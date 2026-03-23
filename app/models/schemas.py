@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-
+from typing import Optional
 
 class OrderRecord(BaseModel):
     work_order_number: str
@@ -84,3 +84,60 @@ class OptimizationResponse(BaseModel):
     vehicles_available: int
     routes: list[RouteResult]
     unassigned: list[dict]
+
+
+class DeletedStopInfo(BaseModel):
+    original_seq: int
+    work_order_numbers: list[str]
+    customer_number: str
+    name: str
+    address: str
+    city: str
+    state: str
+    zip_code: str
+    arrival_time_minutes: int
+    arrival_time_formatted: str
+    pallets: float
+    order_types: list[str]
+    reason: Optional[str] = None
+
+
+class DeleteStopRequest(BaseModel):
+    optimization_id: str
+    vehicle_id: str
+    stop_index: int
+
+
+class UpdatedStop(BaseModel):
+    new_seq: int
+    work_order_numbers: list[str]
+    customer_number: str
+    name: str
+    address: str
+    city: str
+    state: str
+    zip_code: str
+    original_arrival_minutes: int
+    new_arrival_minutes: Optional[int] = None  # Will be None until recalculated
+    pallets: float
+    order_types: list[str]
+
+
+class UpdatedRoute(BaseModel):
+    route_number: int
+    vehicle: str
+    vehicle_capacity_pallets: float
+    total_pallets: float
+    num_stops: int
+    stops: list[UpdatedStop]
+
+
+class DeleteStopResponse(BaseModel):
+    optimization_id: str
+    vehicle_id: str
+    deleted_stop_index: int
+    deleted_stop: DeletedStopInfo
+    updated_route: UpdatedRoute
+    recalculation_needed: bool = True
+    message: str
+    timestamp: str

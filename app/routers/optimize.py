@@ -20,6 +20,7 @@ async def _run_optimization(
     orders_bytes: bytes,
     assets_bytes: bytes,
     use_ors: bool,
+    time_limit_seconds: int = 60,
     api_instructions: str = "",
 ) -> tuple:
     """
@@ -56,6 +57,7 @@ async def _run_optimization(
         vehicles=vehicles,
         duration_matrix=duration_matrix,
         stop_to_location=stop_to_location,
+        time_limit_seconds=time_limit_seconds,
     )
 
     # 6. Wave 2: send eligible trucks back for unassigned stops
@@ -78,6 +80,7 @@ async def optimize_routes(
     orders_file: UploadFile = File(..., description="Orders CSV or XLS file"),
     assets_file: UploadFile = File(..., description="Asset/vehicle CSV file"),
     use_ors: bool = Query(True, description="Use OpenRouteService (True) or Haversine fallback (False)"),
+    time_limit_seconds: int = Query(60, description="Solver time limit in seconds (default: 60)"),
     special_instructions: Optional[str] = Form(
         None,
         description=(
@@ -105,7 +108,7 @@ async def optimize_routes(
         assets_bytes = await assets_file.read()
 
         orders, stops, vehicles, solver_result, constraints = await _run_optimization(
-            orders_bytes, assets_bytes, use_ors, special_instructions or ""
+            orders_bytes, assets_bytes, use_ors, time_limit_seconds, special_instructions or ""
         )
 
         response = build_response(orders, stops, vehicles, solver_result)
@@ -127,6 +130,7 @@ async def optimize_routes_csv(
     orders_file: UploadFile = File(..., description="Orders CSV or XLS file"),
     assets_file: UploadFile = File(..., description="Asset/vehicle CSV file"),
     use_ors: bool = Query(True, description="Use OpenRouteService (True) or Haversine fallback (False)"),
+    time_limit_seconds: int = Query(60, description="Solver time limit in seconds (default: 60)"),
     special_instructions: Optional[str] = Form(
         None,
         description="Optional free-text routing directives — same format as /optimize.",
@@ -141,7 +145,7 @@ async def optimize_routes_csv(
         assets_bytes = await assets_file.read()
 
         orders, stops, vehicles, solver_result, _ = await _run_optimization(
-            orders_bytes, assets_bytes, use_ors, special_instructions or ""
+            orders_bytes, assets_bytes, use_ors, time_limit_seconds, special_instructions or ""
         )
 
         csv_output = build_csv_output(orders, stops, vehicles, solver_result, orders_bytes)
