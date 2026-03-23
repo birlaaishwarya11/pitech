@@ -40,7 +40,9 @@ class GroupedStop(BaseModel):
     total_weight: float
     county: str
     order_indices: list[int]  # indices into the orders list
-    order_types: list[str]    # e.g. ["Dry", "Cold"]
+    order_types: list[str]    # e.g. ["Dry"] or ["Cold"] — never mixed
+    is_large_order: bool = False   # True when stop was split from an oversized address
+    special_note: str = ""         # pass-through note from special instructions
 
 
 class VehicleRecord(BaseModel):

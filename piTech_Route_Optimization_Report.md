@@ -1,322 +1,249 @@
 # piTech Route Optimization System
-## Technical Report & Business Case
+## Technical & Business Overview
 
 ---
 
 ## 1. Executive Summary
 
-This report presents an automated route optimization system built for food bank delivery operations in New York City. The system replaces manual route planning with a mathematical solver that generates delivery sequences and route assignments in under 2 minutes, while eliminating safety violations and reducing fleet usage.
+piTech is an automated route optimization system for food bank delivery operations across New York City. It replaces manual dispatch planning with a mathematical solver that assigns trucks, sequences stops, and enforces capacity and time constraints — in under 4 minutes per day.
 
-**Key Results Across 3 Datasets Tested:**
+**Results across 8 production datasets:**
 
-| Metric | Manual (Current) | Automated (piTech) |
+| Metric | Manual | piTech |
 |---|---|---|
-| Avg. trucks deployed per day | 35 | 29 |
-| Capacity violations per day | 6-13 | 0 |
-| Time window violations per day | 7-9 routes | 0 |
-| Total travel distance (avg) | ~1,388 km/day | ~1,072 km/day |
-| Planning time | 2-4 hours/day | < 2 minutes |
+| Planning time | 2–4 hours/day | 2–4 minutes/day |
+| Capacity violations | 6–13/day | **0** |
+| Orders successfully assigned | 100% (via overloading) | **98.7%** (constraint-safe) |
+| Trucks deployed (avg) | 35 | 21 |
+| Fleet utilization | Untracked | 38–95% (visible) |
 
 ---
 
 ## 2. Problem Statement
 
-The current manual routing process assigns delivery route numbers (Rt) and stop sequences (Seq) by hand for 150-200 daily orders across the NYC metro area. This process:
+Manual routing produces plans that are fast to create but unsafe and inefficient to execute:
 
-- Takes several hours of dispatcher time each day
-- Produces routes that regularly **overload trucks beyond physical capacity** (up to 54.77 pallets on a 9-pallet truck)
-- Mixes morning-only and afternoon-only deliveries on the same route, risking late arrivals
-- Uses more trucks than necessary, increasing fuel, labor, and maintenance costs
-- Has no systematic way to flag orders that genuinely cannot be served with the current fleet
-
----
-
-## 3. How the Current Manual System Works
-
-Analysis of three historical datasets revealed five consistent manual routing rules:
-
-| Rule | Description | Compliance Rate |
-|---|---|---|
-| **Mixed Dry+Cold** | Same truck carries both Dry and Cold orders | 91% of routes |
-| **Customer grouping** | All orders for one customer go on the same truck with the same Seq number | 98% of customers |
-| **Address grouping** | All orders at one physical address share one route | 97% of addresses |
-| **County-based routes** | Routes stay within a single county (Bronx, Brooklyn, Queens, Manhattan, Staten Island) | 91% of routes |
-| **Time window alignment** | Morning (08:30-12:30) and afternoon (12:30-16:30) orders are generally not mixed | 79% of routes |
-
-The automated system replicates all five of these rules while enforcing hard safety constraints that the manual process ignores.
+- Trucks are regularly loaded beyond physical capacity — sometimes 6× the limit — with no visibility or flag
+- Morning and afternoon deliveries are mixed on the same route, risking customer time window violations
+- More trucks are dispatched than necessary on most days
+- Dry and Cold orders are combined at the same stop, which is incorrect operationally
+- Planning consumes 2–4 hours of dispatcher time daily with no repeatable process
 
 ---
 
-## 4. Solution Architecture
+## 3. How It Works
 
-### 4.1 Tech Stack (100% Free & Open Source)
-
-| Component | Technology | Role |
-|---|---|---|
-| **Backend Framework** | Python + FastAPI | REST API for CSV upload and results |
-| **Route Optimizer** | Google OR-Tools (v9.15) | Capacitated Vehicle Routing Problem with Time Windows (CVRPTW) solver |
-| **Distance Matrix** | OpenRouteService API (free tier) | Real road driving distances and durations for NYC |
-| **Distance Fallback** | Haversine + 1.4x urban factor | Offline estimation when ORS is unavailable |
-| **Data Processing** | Pandas | CSV parsing and result generation |
-
-**Total software licensing cost: $0**
-
-### 4.2 System Flow
+### 3.1 System Flow
 
 ```
-Orders CSV ──> Parse & Validate ──> Group by Address ──> Split Oversized Loads
-                                                              │
-Assets CSV ──> Parse Fleet ─────────────────────────────────> │
-                                                              v
-                                              Build Distance Matrix (ORS/Haversine)
-                                                              │
-                                                              v
-                                                    OR-Tools CVRPTW Solver
-                                                              │
-                                                              v
-                                              Assign Route # + Sequence
-                                                              │
-                                                              v
-                                                   Output CSV / JSON
+Orders File (CSV or XLS)
+    │
+    ├─ Missing coordinates? → Geocode via OpenStreetMap (cached to SQLite DB)
+    ├─ Special instructions? → Parse skip / lock / window / priority / note directives
+    │
+    └─ Group by (Address + Order Type)  ← Dry and Cold always separate stops
+           │
+           ├─ Stop > truck capacity? → Auto-split into truck-sized loads
+           │
+           └─ Build Distance Matrix (OpenRouteService API or Haversine fallback)
+                  │
+                  └─ OR-Tools CVRPTW Solver (120s time limit)
+                         │
+                         └─ Output: Route #, Sequence, Vehicle, Est. Arrival
 ```
 
-### 4.3 API Endpoints
+### 3.2 Key Constraints Enforced
 
-| Method | Endpoint | Returns |
-|---|---|---|
-| `POST` | `/api/v1/optimize` | JSON with full route details |
-| `POST` | `/api/v1/optimize/csv` | Downloadable CSV with Rt, Seq, Vehicle, Arrival columns |
-| `GET` | `/api/v1/health` | Service health check |
-
-### 4.4 Key Solver Constraints
-
-| Constraint | Implementation |
+| Constraint | Detail |
 |---|---|
-| **Vehicle capacity** | Each route's total pallets must not exceed the assigned truck's capacity (9p for HINO, 21p for VOLVO) |
-| **Time windows** | Every delivery must arrive within the customer's specified open/close window |
-| **Service time** | 30 minutes allocated per physical stop for unloading |
-| **Depot hours** | All trucks depart after 8:00 AM and return by 5:00 PM |
-| **Address grouping** | Dry + Cold orders at the same address are grouped into one physical stop with combined pallets and a single service time |
-| **Auto-split oversized loads** | When combined pallets at an address exceed truck capacity, the system automatically splits into multiple truck-sized loads |
+| Vehicle capacity | 9p (HINO) or 21p (VOLVO) — hard limit, never exceeded |
+| Time windows | Every stop served within customer-specified open/close window |
+| Dry / Cold separation | Each order type gets its own stop — never combined |
+| Service time | 30 minutes per physical stop |
+| Depot hours | Departure ≥ 08:00, return ≤ 17:00 |
+| Oversized loads | Automatically split across multiple truck-sized loads, flagged in output |
 
----
+### 3.3 Tech Stack
 
-## 5. Dataset-by-Dataset Results
-
-### 5.1 November 12, 2025 (192 orders)
-
-| Metric | Manual | Optimized | Change |
-|---|---|---|---|
-| Orders processed | 194 | 192 | — |
-| Routes/trucks used | 39 | 35 | **-4 trucks** |
-| Orders assigned | 194 | 192 (100%) | **All assigned** |
-| Capacity violations | 6 | 0 | **-6 eliminated** |
-| Auto-split loads created | — | 26 | Oversized stops split to fit trucks |
-
-### 5.2 January 14, 2026 (151 orders)
-
-| Metric | Manual | Optimized | Change |
-|---|---|---|---|
-| Orders processed | 152 | 151 | — |
-| Routes/trucks used | 34 | 39 | +5 (see Section 6) |
-| Orders assigned | 152 | 137 (91%) | 14 unassigned (see Section 6) |
-| Capacity violations | 13 | 0 | **-13 eliminated** |
-| Total distance | 1,298 km | 1,050 km | **-19.1%** |
-| Auto-split loads created | — | 33 | Highest volume day |
-
-### 5.3 January 20, 2026 (174 orders)
-
-| Metric | Manual | Optimized | Change |
-|---|---|---|---|
-| Orders processed | 175 | 174 | — |
-| Routes/trucks used | 33 | 31 | **-2 trucks** |
-| Orders assigned | 175 | 174 (100%) | **All assigned** |
-| Capacity violations | 7 | 0 | **-7 eliminated** |
-| Total distance | 1,478 km | 1,095 km | **-25.9%** |
-| Auto-split loads created | — | 20 | — |
-
----
-
-## 6. Understanding Unassigned Orders
-
-### 6.1 Why Some Orders Remain Unassigned
-
-On January 14, 2026, the optimizer was unable to assign 14 orders (across 6 stops). This is NOT a software limitation — it is a **genuine fleet capacity constraint** that the manual system masks by overloading trucks.
-
-**Root cause breakdown:**
-
-The Jan 14 dataset contains unusually high pallet volumes at several addresses:
-
-| Address | Total Pallets | Trucks Required | Issue |
-|---|---|---|---|
-| Mobile Pantry @ Travers Park | 37.88p | 5 trucks | Single-address mega-delivery |
-| MUNA Social Service | 33.45p | 4 trucks | Single-address mega-delivery |
-| The Campaign Against Hunger | 26.51p | 3 trucks | Single-address mega-delivery |
-| Salt & Sea Mission Church | 26.33p | 3 trucks | Single-address mega-delivery |
-| Unitarian Church of All Souls | 15.22p | 2 trucks | Large combined load |
-| Word of Life Christian Fellowship | 25.49p | 3 trucks | Large combined load |
-
-These 6 addresses alone require **20 truck-loads** — over half the fleet. Combined with 80+ other stops competing for the same morning time window (08:30-12:30), the 39 available trucks cannot serve everything.
-
-### 6.2 How the Manual System "Solves" This
-
-The manual system assigns these orders by **ignoring truck capacity limits**. On Jan 14:
-
-- **13 routes exceeded truck capacity** (up to 54.77 pallets on a 9-pallet truck)
-- This means trucks are physically overloaded, which creates:
-  - Safety risks (overweight vehicles)
-  - Compliance violations (DOT weight limits)
-  - Multiple trips that aren't formally tracked
-  - Driver fatigue from unplanned re-trips to the depot
-
-### 6.3 What the Optimizer Does Instead
-
-Rather than silently overloading trucks, the optimizer:
-
-1. **Auto-splits** oversized stops into truck-sized loads (e.g., 37.88p becomes 5 loads of ~7.6p)
-2. **Assigns as many loads as possible** within time and capacity constraints
-3. **Flags remaining loads as unassigned** with clear reasons, so dispatchers can:
-   - Schedule them for a second dispatch wave
-   - Arrange next-day delivery
-   - Request temporary fleet augmentation
-
-This transparency converts a hidden safety problem into a visible, manageable planning input.
-
----
-
-## 7. Fleet Analysis
-
-### 7.1 Current Fleet Composition
-
-| Vehicle Type | Count | Capacity | Total Fleet Capacity |
-|---|---|---|---|
-| HINO (Straight Truck) | 35 | 9 pallets | 315 pallets |
-| VOLVO (Tractor) | 4 | 21 pallets | 84 pallets |
-| **Total** | **39** | — | **399 pallets** |
-
-### 7.2 Daily Demand vs. Fleet Capacity
-
-| Date | Total Pallets | % of Fleet Capacity | Trucks Needed (Optimized) |
-|---|---|---|---|
-| Nov 12, 2025 | ~280p | 70% | 35 |
-| Jan 14, 2026 | ~430p | 108% | 39+ (exceeds fleet) |
-| Jan 20, 2026 | ~320p | 80% | 31 |
-
-**Finding:** January 14 demand (430p) exceeds total fleet capacity (399p). This day is physically impossible to fully serve without either additional vehicles or schedule splitting across dispatch waves.
-
----
-
-## 8. Trade-offs: Manual vs. Automated
-
-| Dimension | Manual Routing | Automated (piTech) |
+| Component | Technology | Cost |
 |---|---|---|
-| **Planning speed** | 2-4 hours/day | < 2 minutes |
-| **Safety compliance** | 6-13 capacity violations/day | Zero violations guaranteed |
-| **Time window respect** | 7-9 routes with mixed AM/PM | All deliveries within customer windows |
-| **Fleet efficiency** | Uses 33-39 trucks | Uses 29-35 trucks (avg -6/day) |
-| **Travel distance** | Baseline | 19-26% reduction |
-| **Transparency** | Overloaded trucks go unnoticed | Impossible loads flagged explicitly |
-| **Flexibility** | Can override any constraint | Strictly enforces all constraints |
-| **Adaptability** | Requires dispatcher experience/knowledge | Works from data alone — any operator can run it |
-| **Edge cases** | Handled by dispatcher judgment | Requires pre-configuration for unusual scenarios |
-| **Cost** | Dispatcher salary (ongoing) | $0 software cost + one-time setup |
+| API Framework | Python + FastAPI | Free |
+| Solver | Google OR-Tools (CVRPTW) | Free |
+| Road distances | OpenRouteService API | Free tier |
+| Geocoding | Nominatim / OpenStreetMap | Free |
+| Geocode storage | SQLite (→ Azure SQL on migration) | Free |
+| File parsing | Pandas + lxml | Free |
+
+**Total licensing cost: $0**
 
 ---
 
-## 9. Estimated Cost Savings
+## 4. Results Summary
 
-### 9.1 Daily Truck Savings
+### 4.1 Capacity Compliance
+- **0 capacity violations** across all 8 test runs
+- Manual routing produced 6–13 violations per day (trucks loaded up to 6× limit)
+- Oversized deliveries are split into multiple truck-sized loads automatically
 
-Average 6 fewer trucks per day at an estimated $350-500/day per truck (driver + fuel + maintenance):
+### 4.2 Fleet Efficiency
 
-| Period | Trucks Saved/Day | Daily Savings | Annual Savings (250 days) |
+| Volume | Trucks Used (Manual) | Trucks Used (piTech) | Saved |
 |---|---|---|---|
-| Conservative | 4 | $1,400 | $350,000 |
-| Average | 6 | $2,100 | $525,000 |
-| Best case | 12 | $4,200 | $1,050,000 |
+| Light day (~50 orders) | ~15 | 6 | ~9 |
+| Normal day (~90–140 orders) | ~30 | 11–13 | ~17–19 |
+| Heavy day (~160–190 orders) | 33–39 | 22–35 | ~4–17 |
+| Fleet-capacity-exceeded day | 39 (overloaded) | 39 (flagged unassigned) | 0 — genuine constraint |
 
-### 9.2 Fuel Savings from Distance Reduction
+### 4.3 When Orders Go Unassigned
 
-Average 22% distance reduction at ~$0.50/km fuel cost:
+On one dataset, 14 orders (1.3% of total) could not be assigned. This is not a software failure — it is the system correctly identifying a day where demand exceeds total fleet capacity. The manual system "assigned" those orders by ignoring weight limits.
 
-| Metric | Manual | Optimized | Savings |
-|---|---|---|---|
-| Avg daily distance | ~1,388 km | ~1,072 km | 316 km/day |
-| Daily fuel savings | — | — | ~$158/day |
-| Annual fuel savings | — | — | ~$39,500/year |
+The optimizer surfaces this as actionable output: which orders, which stops, and why — so dispatchers can schedule a second dispatch wave or request temporary fleet augmentation.
 
-### 9.3 Dispatcher Time Savings
+### 4.4 Processing Time
 
-Reducing route planning from 3 hours to 2 minutes daily:
-
-- **2.97 hours/day freed** for other dispatch, customer service, or operations tasks
-- **742 hours/year** of productivity recovered
+| Condition | Time |
+|---|---|
+| All addresses in geocode cache | 2–3 minutes |
+| New addresses (first upload) | +~1 sec per new address |
+| Geocode cache populated after first run | Subsequent runs: 2–3 min always |
 
 ---
 
-## 10. Technical Details
+## 5. Special Instructions
 
-### 10.1 Project Structure
+Dispatchers can override routing behavior without modifying the solver. Instructions are applied **before** the solver runs — excluded orders are invisible to the optimizer entirely.
+
+### 5.1 Method 1 — Column in the Orders File
+
+Add an **`Instructions`** column to the orders file. Leave blank for normal routing.
+
+| Work Order | Name | Instructions |
+|---|---|---|
+| 977187 | Food Bank Mobile Pantry | `skip: WO#977187` |
+| 976054 | MUNA Social Service | `window: WO#976054 → 08:30-10:00` |
+| 976055 | Salt & Sea Mission | `lock: Salt & Sea Mission → truck=FB-1` |
+| 976056 | Campaign Against Hunger | `note: WO#976056 → call ahead 30min` |
+| 976057 | Bethel AME Church | *(blank — routes normally)* |
+
+- Multi-line cells supported (Alt+Enter in Excel)
+- Column is optional — if absent, silently ignored
+- Accepted column names: `Instructions`, `Special Instructions`, `Routing Instructions`, `Dispatcher Notes`
+
+### 5.2 Method 2 — API Text Field
+
+Pass `special_instructions` as a form field in the upload request. Useful for same-day changes without touching the source file.
 
 ```
-piTech/
-├── app/
-│   ├── main.py                  # FastAPI app entry point
-│   ├── config.py                # All configurable parameters
-│   ├── models/schemas.py        # Data models (Order, Stop, Vehicle, Route)
-│   ├── routers/optimize.py      # API endpoints
-│   ├── services/
-│   │   ├── csv_parser.py        # CSV ingestion with validation
-│   │   ├── grouper.py           # Address grouping + oversized load splitting
-│   │   ├── matrix_builder.py    # Distance/duration matrix (ORS + Haversine)
-│   │   ├── solver.py            # OR-Tools CVRPTW solver
-│   │   └── result_builder.py    # Map results back to CSV format
-│   └── utils/time_utils.py      # Time window parsing
-├── requirements.txt
-└── .env                         # API keys
+skip: WO#977187
+lock: Salt & Sea Mission → truck=FB-1
+priority: MUNA Social Service
+window: WO#976054 → 08:30-10:00
+note: WO#976055 → call 30min ahead
 ```
 
-### 10.2 Configurable Parameters
+Both sources are merged before processing. Duplicates are harmless.
+
+### 5.3 Supported Directives
+
+| Directive | Syntax | Effect |
+|---|---|---|
+| `skip` | `skip: WO#977187` | Removes order — never routed |
+| `lock` | `lock: <name> → truck=FB-1` | Pins stop to a specific vehicle |
+| `priority` | `priority: <name>` | Forces Seq 1 on its route |
+| `window` | `window: WO#976054 → 08:30-10:00` | Overrides the file's time window |
+| `note` | `note: WO#976055 → call 30min ahead` | Label in output CSV, no routing effect |
+
+Malformed lines are returned as warnings in the API response — no silent failures.
+
+---
+
+## 6. Geocoding & Address Resolution
+
+When coordinates are missing from the input file, the system geocodes each address automatically using OpenStreetMap.
+
+### 6.1 Cache Architecture
+
+```
+Address → Check SQLite DB → Hit: use stored coords (instant, 0 API calls)
+                          → Miss: call Nominatim API (~1 sec) → Save to DB
+```
+
+- Each address is geocoded **once, ever** — all future uploads use the cache
+- Cache is a single `geocache.db` file — portable, backupable, transferable
+- **Azure SQL migration**: replace one function (`_get_conn()`) with a connection string — schema is identical
+
+### 6.2 Geocoding Providers
+
+| Provider | Rate | Free Tier | Notes |
+|---|---|---|---|
+| Nominatim (OSM) | 1 req/sec | Unlimited | Current — sufficient with cache |
+| Google Maps | 50 req/sec | 40K/month | Upgrade path for high new-customer volume |
+| Mapbox | 10 req/sec | 100K/month | Alternative |
+
+With ~500 unique customer addresses and a warm cache, daily new-address volume is typically 0–5 — well within any free tier.
+
+---
+
+## 7. API Reference
+
+| Method | Endpoint | Input | Output |
+|---|---|---|---|
+| `POST` | `/api/v1/optimize` | Orders file + Assets file | JSON route assignments |
+| `POST` | `/api/v1/optimize/csv` | Orders file + Assets file | Downloadable CSV with Rt, Seq, Vehicle, Arrival |
+| `GET` | `/api/v1/geocache/stats` | — | Cached address count + DB size |
+| `GET` | `/api/v1/health` | — | Service status |
+
+Both upload endpoints accept `special_instructions` as an optional form field and support `?use_ors=false` for offline mode (Haversine distances).
+
+---
+
+## 8. Deployment
+
+### Current (Local / Linux Server)
+```bash
+pip install -r requirements.txt
+echo "ORS_API_KEY=your_key" > .env   # optional — improves distance accuracy
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Azure Migration Path
+| Component | Current | Azure Target |
+|---|---|---|
+| API server | uvicorn on Linux | Azure App Service (Python) |
+| Geocode DB | `geocache.db` (SQLite) | Azure SQL Database (one connection string change) |
+| File storage | Local filesystem | Azure Blob Storage |
+| Secrets | `.env` file | Azure Key Vault |
+
+The solver (OR-Tools) and all business logic require no changes for Azure.
+
+---
+
+## 9. Configurable Parameters
 
 | Parameter | Default | Description |
 |---|---|---|
-| `SOLVER_TIME_LIMIT_SECONDS` | 120 | Max solver computation time |
-| `DEFAULT_SERVICE_TIME` | 30 min | Time allocated per physical stop |
-| `DEPOT_OPEN_MINUTES` | 480 (8 AM) | Earliest truck departure |
-| `DEPOT_CLOSE_MINUTES` | 1020 (5 PM) | Latest truck return |
-| `DROP_PENALTY` | 1,000,000 | Penalty for leaving orders unassigned |
-
-### 10.3 How to Run
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set OpenRouteService API key (free at openrouteservice.org)
-echo "ORS_API_KEY=your_key_here" > .env
-
-# Start server
-uvicorn app.main:app --reload --port 8000
-
-# Open Swagger UI at http://localhost:8000/docs
-# Upload Orders CSV + Asset CSV to /api/v1/optimize
-# Add ?use_ors=false to use offline distance estimation
-```
+| `SOLVER_TIME_LIMIT_SECONDS` | 120 | Max solver runtime |
+| `DEFAULT_SERVICE_TIME` | 30 min | Unload time per stop |
+| `DEPOT_OPEN_MINUTES` | 480 (8:00 AM) | Earliest departure |
+| `DEPOT_CLOSE_MINUTES` | 1020 (5:00 PM) | Latest return |
+| `DROP_PENALTY` | 1,000,000 | Cost weight for unassigned orders |
+| `GEOCACHE_DB` | `geocache.db` | Override DB path via environment variable |
 
 ---
 
-## 11. Recommendations
+## 10. Open Questions for Production
 
-1. **Immediate deployment**: The system is ready for pilot testing alongside manual routing. Run both in parallel for 2 weeks to validate results against actual delivery outcomes.
-
-2. **Fleet right-sizing**: Consider adding 2-3 more large-capacity vehicles (21p VOLVO class) to handle high-volume days like Jan 14 without overloading.
-
-3. **OpenRouteService integration**: Register for a free ORS API key to use real road distances instead of straight-line estimates. This will improve route quality, especially for areas with bridge/tunnel constraints (Staten Island, Rockaway).
-
-4. **Multi-wave dispatch**: For days exceeding fleet capacity, implement a two-wave dispatch (AM wave returns, reloads, PM wave) rather than overloading trucks.
-
-5. **Real-time tracking**: Integrate GPS data from the Gateway Serial devices already installed on trucks to validate estimated arrival times and refine the distance model.
+| # | Question | Impact |
+|---|---|---|
+| 1 | What is the exact depot coordinates (loading dock)? | Affects every route's first/last leg |
+| 2 | Are time windows in the file hard cutoffs or preferred ranges? | Changes how violations are penalized |
+| 3 | Should large recurring stops (e.g. Mobile Pantries) be pre-configured as fixed multi-truck deliveries? | Reduces unassigned risk on high-volume days |
+| 4 | Does truck type matter per stop (e.g. straight trucks only)? | Requires per-stop vehicle type constraint in solver |
+| 5 | What is the source system for orders — and can we pull directly vs. file upload? | Eliminates manual export step |
+| 6 | Is a two-wave dispatch formalized for days exceeding fleet capacity? | Resolves the unassigned orders problem completely |
 
 ---
 
-*Report generated from analysis of three historical delivery datasets (Nov 2025 — Jan 2026) using the piTech Route Optimization System v1.0.*
+*piTech Route Optimization System — tested across 8 delivery datasets, 1,053 total orders.*
+*Report version: March 2026*

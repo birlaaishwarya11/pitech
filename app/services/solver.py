@@ -7,8 +7,10 @@ from app.models.schemas import GroupedStop, VehicleRecord
 def solve_vrp(
     stops: list[GroupedStop],
     vehicles: list[VehicleRecord],
-    duration_matrix: list[list[int]],  # seconds, indexed by unique location
-    stop_to_location: list[int],       # stop index -> unique location index
+    duration_matrix: list[list[int]],       # seconds, indexed by unique location
+    stop_to_location: list[int],            # stop index -> unique location index
+    vehicle_start_times: list[int] | None = None,  # per-vehicle earliest depot departure (minutes)
+    time_limit_seconds: int | None = None,
 ) -> dict:
     """
     Solve the CVRPTW using Google OR-Tools.
@@ -70,15 +72,13 @@ def solve_vrp(
         time_dimension.CumulVar(index).SetRange(stop.open_time, stop.close_time)
 
     # Set depot time windows for each vehicle
+    # vehicle_start_times allows wave-2 trucks to depart after returning to depot
     for v in range(num_vehicles):
         start_index = routing.Start(v)
         end_index = routing.End(v)
-        time_dimension.CumulVar(start_index).SetRange(
-            settings.DEPOT_OPEN_MINUTES, settings.DEPOT_CLOSE_MINUTES
-        )
-        time_dimension.CumulVar(end_index).SetRange(
-            settings.DEPOT_OPEN_MINUTES, settings.DEPOT_CLOSE_MINUTES
-        )
+        v_start = vehicle_start_times[v] if vehicle_start_times else settings.DEPOT_OPEN_MINUTES
+        time_dimension.CumulVar(start_index).SetRange(v_start, settings.DEPOT_CLOSE_MINUTES)
+        time_dimension.CumulVar(end_index).SetRange(v_start, settings.DEPOT_CLOSE_MINUTES)
 
     # Minimize total route time
     for v in range(num_vehicles):
@@ -116,7 +116,8 @@ def solve_vrp(
     search_params.local_search_metaheuristic = (
         routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     )
-    search_params.time_limit.FromSeconds(settings.SOLVER_TIME_LIMIT_SECONDS)
+    limit = time_limit_seconds if time_limit_seconds is not None else settings.SOLVER_TIME_LIMIT_SECONDS
+    search_params.time_limit.FromSeconds(limit)
     search_params.log_search = False
 
     # --- Solve ---

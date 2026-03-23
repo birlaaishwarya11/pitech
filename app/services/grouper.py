@@ -8,59 +8,79 @@ from app.models.schemas import OrderRecord, GroupedStop, VehicleRecord
 def group_orders_into_stops(
     orders: list[OrderRecord],
     vehicles: list[VehicleRecord],
+    constraints: dict | None = None,
 ) -> list[GroupedStop]:
     """
-    Group orders at the same physical address into single stops.
-    This matches the manual routing approach where Dry+Cold orders
-    for the same customer/address are delivered as one physical stop.
+    Group orders into physical stops with two key rules:
 
-    Oversized stops (pallets > max vehicle capacity) are automatically
-    split into multiple truck-sized loads so nothing is left unassigned.
+    1. Dry and Cold orders are NEVER grouped into the same stop,
+       even if they share an address. Each type gets its own stop.
 
-    Grouping key: (latitude, longitude) rounded to 6 decimals.
+    2. Stops that exceed the smallest vehicle capacity are auto-split
+       into truck-sized loads so every load can be served by any truck.
+       These are flagged as is_large_order=True.
+
+    Grouping key: (latitude, longitude, order_type)
+
+    constraints dict (from instructions_parser) may contain:
+      - skip_wos: set of WO numbers to exclude
+      - window_overrides: {wo: (open_min, close_min)}
+      - notes: {wo: note_text}
     """
-    # Use the most common (smallest) vehicle capacity as the split target.
-    # With 35 HINOs (9p) and 4 VOLVOs (21p), splitting to 9p ensures
-    # every load can be served by ANY truck in the fleet.
-    min_vehicle_capacity = min(v.capacity for v in vehicles)
+    constraints = constraints or {}
+    skip_wos = constraints.get("skip_wos", set())
+    window_overrides = constraints.get("window_overrides", {})
+    notes = constraints.get("notes", {})
 
-    # Group by rounded coordinates
+    min_cap = min(v.capacity for v in vehicles)  # split target = smallest truck (HINO 9p)
+
+    # Group by (lat, lng, order_type) — Dry and Cold stay separate
     coord_groups: dict[tuple, list[int]] = defaultdict(list)
     for i, order in enumerate(orders):
-        key = (round(order.latitude, 6), round(order.longitude, 6))
+        if order.work_order_number in skip_wos:
+            continue
+        # Apply window override before grouping
+        if order.work_order_number in window_overrides:
+            open_m, close_m = window_overrides[order.work_order_number]
+            order = order.model_copy(update={"open_time": open_m, "close_time": close_m})
+            orders[i] = order
+        key = (round(order.latitude, 6), round(order.longitude, 6), order.order_type)
         coord_groups[key].append(i)
 
     stops = []
     stop_id = 0
 
-    for coord, indices in coord_groups.items():
+    for key, indices in coord_groups.items():
+        order_type = key[2]
         group_orders = [orders[i] for i in indices]
 
-        # Sum pallets and weight
         total_pallets = sum(o.total_pallets for o in group_orders)
         total_weight = sum(o.weight for o in group_orders)
 
-        # Tightest time window (intersection)
+        # Tightest time window (intersection), fall back to widest if empty
         open_time = max(o.open_time for o in group_orders)
         close_time = min(o.close_time for o in group_orders)
-
-        # If intersection is empty, fall back to the widest window
         if open_time >= close_time:
             open_time = min(o.open_time for o in group_orders)
             close_time = max(o.close_time for o in group_orders)
 
-        # Collect order types
-        order_types = sorted(set(o.order_type for o in group_orders if o.order_type))
+        order_types = [order_type] if order_type else []
 
-        # Address info from first order
         first = group_orders[0]
         county = first.county
         counties = [o.county for o in group_orders if o.county]
         if counties:
             county = max(set(counties), key=counties.count)
 
-        # If total pallets fit in one truck, create a single stop
-        if total_pallets <= min_vehicle_capacity:
+        # Collect any pass-through notes for orders in this group
+        stop_note = "; ".join(
+            f"WO#{orders[i].work_order_number}: {notes[orders[i].work_order_number]}"
+            for i in indices
+            if orders[i].work_order_number in notes
+        )
+
+        if total_pallets <= min_cap:
+            # Normal stop — fits on any truck as-is
             stops.append(GroupedStop(
                 stop_id=stop_id,
                 address=first.address,
@@ -78,31 +98,26 @@ def group_orders_into_stops(
                 county=county,
                 order_indices=indices,
                 order_types=order_types,
+                is_large_order=False,
+                special_note=stop_note,
             ))
             stop_id += 1
         else:
-            # Split oversized stop into multiple truck-sized loads.
-            # Each load is capped at min_vehicle_capacity. A single large
-            # order that itself exceeds capacity is spread across multiple
-            # loads (the same order_index appears in each sub-load, with
-            # pallets divided evenly).
-            num_loads = math.ceil(total_pallets / min_vehicle_capacity)
+            # Large order — split into min_cap-sized loads, flag each as large
+            num_loads = math.ceil(total_pallets / min_cap)
             pallets_per_load = total_pallets // num_loads
             remainder = total_pallets - pallets_per_load * num_loads
-
-            # Weight follows the same proportional split
             weight_per_load = total_weight / num_loads
 
             for load_num in range(num_loads):
                 load_pallets = pallets_per_load + (1 if load_num < remainder else 0)
-                suffix = f" (Load {load_num + 1})"
                 stops.append(GroupedStop(
                     stop_id=stop_id,
                     address=first.address,
                     city=first.city,
                     state=first.state,
                     zip_code=first.zip_code,
-                    name=first.name + suffix,
+                    name=f"{first.name} (Load {load_num + 1})",
                     latitude=first.latitude,
                     longitude=first.longitude,
                     open_time=open_time,
@@ -111,8 +126,10 @@ def group_orders_into_stops(
                     total_pallets=load_pallets,
                     total_weight=round(weight_per_load, 2),
                     county=county,
-                    order_indices=indices,  # all orders linked to each sub-load
+                    order_indices=indices,
                     order_types=order_types,
+                    is_large_order=True,
+                    special_note=stop_note,
                 ))
                 stop_id += 1
 
