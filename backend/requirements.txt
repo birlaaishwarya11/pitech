@@ -1,0 +1,11 @@
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+pandas>=2.1.0
+ortools>=9.8
+openrouteservice>=2.3.3
+httpx>=0.25.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+lxml
+geopy
