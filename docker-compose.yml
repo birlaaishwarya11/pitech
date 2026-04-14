@@ -1,0 +1,18 @@
+services:
+  ors:
+    image: openrouteservice/openrouteservice:v8.2.0
+    container_name: pitech-ors
+    ports:
+      - "8080:8082"
+    volumes:
+      - ./ors-data:/home/ors
+    environment:
+      XMS: 512m
+      XMX: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/ors/v2/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+    restart: unless-stopped

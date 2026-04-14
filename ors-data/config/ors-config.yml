@@ -1,0 +1,12 @@
+ors:
+  endpoints:
+    matrix:
+      maximum_routes: 10000
+      maximum_routes_flexible: 100
+      maximum_visited_nodes: 500000
+  engine:
+    source_file: /home/ors/files/new-york-latest.osm.pbf
+    init_threads: 2
+    profiles:
+      hgv:
+        enabled: true
