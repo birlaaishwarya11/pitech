@@ -4,7 +4,9 @@ backend/__pycache__/
 backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.matrix_cache/
-backend/geocache.db
+
+# ORS self-hosted data (OSM extract + routing graph)
+ors-data/
 
 # Node / Vite
 frontend/node_modules/

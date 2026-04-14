@@ -11,6 +11,8 @@ def solve_vrp(
     stop_to_location: list[int],            # stop index -> unique location index
     vehicle_start_times: list[int] | None = None,  # per-vehicle earliest depot departure (minutes)
     time_limit_seconds: int | None = None,
+    depot_open_minutes: int | None = None,
+    depot_close_minutes: int | None = None,
 ) -> dict:
     """
     Solve the CVRPTW using Google OR-Tools.
@@ -76,9 +78,11 @@ def solve_vrp(
     for v in range(num_vehicles):
         start_index = routing.Start(v)
         end_index = routing.End(v)
-        v_start = vehicle_start_times[v] if vehicle_start_times else settings.DEPOT_OPEN_MINUTES
-        time_dimension.CumulVar(start_index).SetRange(v_start, settings.DEPOT_CLOSE_MINUTES)
-        time_dimension.CumulVar(end_index).SetRange(v_start, settings.DEPOT_CLOSE_MINUTES)
+        d_open = depot_open_minutes if depot_open_minutes is not None else settings.DEPOT_OPEN_MINUTES
+        d_close = depot_close_minutes if depot_close_minutes is not None else settings.DEPOT_CLOSE_MINUTES
+        v_start = vehicle_start_times[v] if vehicle_start_times else d_open
+        time_dimension.CumulVar(start_index).SetRange(v_start, d_close)
+        time_dimension.CumulVar(end_index).SetRange(v_start, d_close)
 
     # Minimize total route time
     for v in range(num_vehicles):
@@ -165,6 +169,17 @@ def solve_vrp(
             index = solution.Value(routing.NextVar(index))
 
         if route_stops:
+            # Calculate finish time: last stop arrival + service there + drive back to depot
+            last = route_stops[-1]
+            last_service = stops[last["stop_idx"]].service_time
+            last_loc = stop_to_location[last["stop_idx"]]
+            depot_loc = 0
+            return_drive_minutes = duration_matrix[last_loc][depot_loc] // 60
+            finish_time = last["arrival"] + last_service + return_drive_minutes
+
+            for s in route_stops:
+                s["finish_time"] = finish_time
+
             routes[vehicle_id] = route_stops
 
     # Find dropped stops

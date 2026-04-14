@@ -1,4 +1,6 @@
-import { FileText, Package } from "lucide-react";
+import { useState } from "react";
+import { FileText, Package, Clock, Layers } from "lucide-react";
+import { SpecialInstructionsBuilder } from "./SpecialInstructionsBuilder";
 
 interface UploadOrdersProps {
   ordersCount: number;
@@ -10,6 +12,14 @@ interface UploadOrdersProps {
   onOrdersFileChange: (file: File | null) => void;
   onAssetsFileChange: (file: File | null) => void;
   onSpecialInstructionsChange: (value: string) => void;
+  depotOpen: string;
+  depotClose: string;
+  numWaves: number;
+  wave2Cutoff: string;
+  onDepotOpenChange: (value: string) => void;
+  onDepotCloseChange: (value: string) => void;
+  onNumWavesChange: (value: number) => void;
+  onWave2CutoffChange: (value: string) => void;
 }
 
 export function UploadOrders({
@@ -22,100 +32,216 @@ export function UploadOrders({
   onOrdersFileChange,
   onAssetsFileChange,
   onSpecialInstructionsChange,
+  depotOpen,
+  depotClose,
+  numWaves,
+  wave2Cutoff,
+  onDepotOpenChange,
+  onDepotCloseChange,
+  onNumWavesChange,
+  onWave2CutoffChange,
 }: UploadOrdersProps) {
+  const [instructionMode, setInstructionMode] = useState<"structured" | "raw">(
+    "structured"
+  );
+
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-5">
-      <h3 className="text-sm font-semibold text-gray-900 mb-4">Upload Files</h3>
+    <div className="space-y-4">
+      {/* File Uploads */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h3 className="text-sm font-semibold text-gray-900 mb-4">
+          Upload Files
+        </h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-2">
+              Orders file
+            </label>
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              disabled={isOptimizing}
+              onChange={(e) => onOrdersFileChange(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-blue-700"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {ordersFile ? ordersFile.name : "No orders file selected"}
+            </p>
+          </div>
 
-      <div className="space-y-4">
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-2">
-            Orders file
-          </label>
-          <input
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            disabled={isOptimizing}
-            onChange={(e) => onOrdersFileChange(e.target.files?.[0] ?? null)}
-            className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-blue-700"
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            {ordersFile ? ordersFile.name : "No orders file selected"}
-          </p>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-2">
+              Assets file
+            </label>
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              disabled={isOptimizing}
+              onChange={(e) => onAssetsFileChange(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-blue-700"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              {assetsFile ? assetsFile.name : "No assets file selected"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Depot & Wave Settings */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <Clock className="size-4 text-gray-500" />
+          Schedule
+        </h3>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Depot opens
+              </label>
+              <input
+                type="time"
+                value={depotOpen}
+                disabled={isOptimizing}
+                onChange={(e) => onDepotOpenChange(e.target.value)}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Depot closes
+              </label>
+              <input
+                type="time"
+                value={depotClose}
+                disabled={isOptimizing}
+                onChange={(e) => onDepotCloseChange(e.target.value)}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <div className="flex items-center gap-2">
+              <Layers className="size-3.5 text-gray-500" />
+              <label className="text-xs font-medium text-gray-700">Waves</label>
+            </div>
+            <div className="flex rounded-md border border-gray-300 overflow-hidden text-xs">
+              <button
+                type="button"
+                disabled={isOptimizing}
+                className={`px-3 py-1.5 font-medium transition-colors ${
+                  numWaves === 1
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+                onClick={() => onNumWavesChange(1)}
+              >
+                1 wave
+              </button>
+              <button
+                type="button"
+                disabled={isOptimizing}
+                className={`px-3 py-1.5 font-medium transition-colors border-l border-gray-300 ${
+                  numWaves === 2
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+                onClick={() => onNumWavesChange(2)}
+              >
+                2 waves
+              </button>
+            </div>
+          </div>
+
+          {numWaves === 2 && (
+            <div className="pl-6">
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Wave 2 cutoff (latest dispatch)
+              </label>
+              <input
+                type="time"
+                value={wave2Cutoff}
+                disabled={isOptimizing}
+                onChange={(e) => onWave2CutoffChange(e.target.value)}
+                className="w-full max-w-[140px] rounded border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Special Instructions */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-900">
+            Special Instructions
+          </h3>
+          <button
+            type="button"
+            className="text-xs text-gray-500 hover:text-gray-700 underline"
+            onClick={() =>
+              setInstructionMode(
+                instructionMode === "structured" ? "raw" : "structured"
+              )
+            }
+          >
+            {instructionMode === "structured" ? "Raw text" : "Guided"}
+          </button>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-2">
-            Assets file
-          </label>
-          <input
-            type="file"
-            accept=".csv,.xlsx,.xls"
+        {instructionMode === "structured" ? (
+          <SpecialInstructionsBuilder
+            onChange={onSpecialInstructionsChange}
             disabled={isOptimizing}
-            onChange={(e) => onAssetsFileChange(e.target.files?.[0] ?? null)}
-            className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-blue-700"
           />
-          <p className="text-xs text-gray-500 mt-1">
-            {assetsFile ? assetsFile.name : "No assets file selected"}
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-2">
-            Special instructions (optional)
-          </label>
+        ) : (
           <textarea
             value={specialInstructions}
             disabled={isOptimizing}
             onChange={(e) => onSpecialInstructionsChange(e.target.value)}
-            placeholder="Add any special routing instructions..."
-            rows={4}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder={`skip: WO#977187\nlock: Name → truck=FB-1\npriority: Stop Name\nwindow: WO#976054 → 08:30-10:00\nnote: WO#976055 → call ahead`}
+            rows={5}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 font-mono placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-        </div>
-
-        <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-          Backend optimize endpoint requires both files:
-          <span className="font-medium"> orders_file </span>
-          and
-          <span className="font-medium"> assets_file</span>.
-        </div>
-
-        {ordersCount > 0 && (
-          <div className="space-y-4">
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <p className="text-sm font-medium text-gray-900">
-                Optimization result loaded
-              </p>
-              <p className="text-xs text-gray-600 mt-1">
-                Backend response received successfully
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-gray-600 mb-1">
-                  <FileText className="size-4" />
-                  <span className="text-xs">Orders</span>
-                </div>
-                <p className="text-2xl font-semibold text-gray-900">
-                  {ordersCount}
-                </p>
-              </div>
-
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-gray-600 mb-1">
-                  <Package className="size-4" />
-                  <span className="text-xs">Pallets</span>
-                </div>
-                <p className="text-2xl font-semibold text-gray-900">
-                  {totalPallets}
-                </p>
-              </div>
-            </div>
-          </div>
         )}
       </div>
+
+      {/* Result Stats */}
+      {ordersCount > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <p className="text-sm font-medium text-gray-900">
+              Optimization result loaded
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              Backend response received successfully
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-gray-600 mb-1">
+                <FileText className="size-4" />
+                <span className="text-xs">Orders</span>
+              </div>
+              <p className="text-2xl font-semibold text-gray-900">
+                {ordersCount}
+              </p>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-gray-600 mb-1">
+                <Package className="size-4" />
+                <span className="text-xs">Pallets</span>
+              </div>
+              <p className="text-2xl font-semibold text-gray-900">
+                {totalPallets}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

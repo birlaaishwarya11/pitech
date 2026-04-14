@@ -84,6 +84,8 @@ class RouteResult(BaseModel):
     vehicle_capacity_pallets: float
     total_pallets: float
     num_stops: int
+    total_distance_km: Optional[float] = None
+    finish_time_minutes: Optional[int] = None
     stops: list[StopResult]
     geometry: Optional[RouteGeometry] = None
 
@@ -100,3 +102,4 @@ class OptimizationResponse(BaseModel):
     depot: DepotInfo
     routes: list[RouteResult]
     unassigned: list[dict]
+    warnings: list[str] = []
