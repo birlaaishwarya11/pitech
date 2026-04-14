@@ -10,6 +10,8 @@ backend/geocache.db
 frontend/node_modules/
 frontend/dist/
 
+frontend/.next
+
 # Env files
 backend/.env
 frontend/.env
@@ -26,9 +28,16 @@ Thumbs.db
 # Python cache
 **/__pycache__/
 *.pyc
+.venv/
 
 # macOS
 .DS_Store
 
 # temp / backup
 *.bak
+
+.env
+.env.local
+.env.*.local
+
+.matrix_cache/
