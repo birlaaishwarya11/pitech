@@ -1,5 +1,6 @@
-import { Calendar, Truck, MapPin, Route, Clock } from "lucide-react";
+import { Calendar, Truck, MapPin, Route, Clock, Settings } from "lucide-react";
 import { Button } from "./ui/button";
+import { Link } from "react-router-dom";
 
 interface TopBarProps {
   selectedDate: string;
@@ -85,6 +86,13 @@ export function TopBar({
       </div>
       
       <div className="flex items-center gap-3">
+        <Link to="/settings">
+          <Button variant="outline" size="sm" className="flex items-center gap-2">
+            <Settings className="size-4" />
+            Settings
+          </Button>
+        </Link>
+        
         {needsRerun && (
           <div className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
             <div className="size-2 rounded-full bg-orange-500 animate-pulse" />

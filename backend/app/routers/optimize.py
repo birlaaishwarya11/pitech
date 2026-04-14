@@ -2,6 +2,7 @@ from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from typing import Optional
 import io
+import json
 
 from app.models.schemas import OptimizationResponse
 from app.services.csv_parser import parse_orders_csv, parse_assets_csv
@@ -12,6 +13,7 @@ from app.services.result_builder import build_response, build_csv_output
 from app.services.instructions_parser import parse_instructions
 from app.services.geocache import cache_stats
 from app.services.wave2 import plan_second_wave, merge_waves
+from app.config import Settings
 
 router = APIRouter(prefix="/api/v1", tags=["optimization"])
 
@@ -21,6 +23,7 @@ async def _run_optimization(
     assets_bytes: bytes,
     use_ors: bool,
     api_instructions: str = "",
+    settings_overrides: dict = None,
 ) -> tuple:
     """
     Shared optimization pipeline.
@@ -32,6 +35,12 @@ async def _run_optimization(
     Both are parsed before the solver runs, so skips/overrides/locks are
     applied during stop creation — the solver never sees excluded orders.
     """
+    # Apply settings overrides
+    if settings_overrides:
+        for key, value in settings_overrides.items():
+            if hasattr(settings, key):
+                setattr(settings, key, value)
+
     # 1. Parse file — returns (orders, inline_instructions_from_file)
     orders, inline_instructions = parse_orders_csv(orders_bytes)
     vehicles = parse_assets_csv(assets_bytes)
@@ -91,6 +100,10 @@ async def optimize_routes(
             "These are merged with any 'Instructions' column in the uploaded file."
         ),
     ),
+    settings: Optional[str] = Form(
+        None,
+        description="Optional JSON string with backend settings to override defaults"
+    ),
 ):
     """
     Upload orders (CSV or XLS) and asset CSV, run route optimization,
@@ -104,8 +117,35 @@ async def optimize_routes(
         orders_bytes = await orders_file.read()
         assets_bytes = await assets_file.read()
 
+        settings_overrides = None
+        if settings:
+            try:
+                parsed = json.loads(settings)
+                # Map frontend camelCase to backend UPPER_CASE
+                key_mapping = {
+                    'depotLat': 'DEPOT_LAT',
+                    'depotLng': 'DEPOT_LNG',
+                    'solverTimeLimit': 'SOLVER_TIME_LIMIT_SECONDS',
+                    'maxVehicleTime': 'SOLVER_MAX_VEHICLE_TIME_MINUTES',
+                    'maxWaitingTime': 'SOLVER_MAX_WAITING_MINUTES',
+                    'depotOpenMinutes': 'DEPOT_OPEN_MINUTES',
+                    'depotCloseMinutes': 'DEPOT_CLOSE_MINUTES',
+                    'defaultServiceTime': 'DEFAULT_SERVICE_TIME',
+                    'palletScale': 'PALLET_SCALE',
+                    'orsApiKey': 'ORS_API_KEY',
+                    'orsBaseUrl': 'ORS_BASE_URL',
+                    'orsMatrixBatchSize': 'ORS_MATRIX_BATCH_SIZE',
+                    'dropPenalty': 'DROP_PENALTY',
+                    'wave2ReloadBuffer': 'WAVE2_RELOAD_BUFFER_MINUTES',
+                    'wave2CutoffMinutes': 'WAVE2_CUTOFF_MINUTES',
+                    'wave2SolverTimeLimit': 'WAVE2_SOLVER_TIME_LIMIT_SECONDS',
+                }
+                settings_overrides = {key_mapping.get(k, k): v for k, v in parsed.items() if k in key_mapping}
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=422, detail="Invalid settings JSON")
+
         orders, stops, vehicles, solver_result, constraints = await _run_optimization(
-            orders_bytes, assets_bytes, use_ors, special_instructions or ""
+            orders_bytes, assets_bytes, use_ors, special_instructions or "", settings_overrides
         )
 
         response = build_response(orders, stops, vehicles, solver_result)
