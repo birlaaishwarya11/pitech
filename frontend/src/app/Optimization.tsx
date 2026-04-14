@@ -69,6 +69,12 @@ export default function Optimization() {
   const [optimizationResult, setOptimizationResult] =
     useState<OptimizationResponse | null>(null);
 
+  // Depot & wave settings
+  const [depotOpen, setDepotOpen] = useState("08:00");
+  const [depotClose, setDepotClose] = useState("17:00");
+  const [numWaves, setNumWaves] = useState(2);
+  const [wave2Cutoff, setWave2Cutoff] = useState("16:00");
+
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -329,6 +335,14 @@ export default function Optimization() {
             onOrdersFileChange={handleOrdersFileChange}
             onAssetsFileChange={handleAssetsFileChange}
             onSpecialInstructionsChange={setSpecialInstructionsText}
+            depotOpen={depotOpen}
+            depotClose={depotClose}
+            numWaves={numWaves}
+            wave2Cutoff={wave2Cutoff}
+            onDepotOpenChange={setDepotOpen}
+            onDepotCloseChange={setDepotClose}
+            onNumWavesChange={setNumWaves}
+            onWave2CutoffChange={setWave2Cutoff}
           />
 
           <div className="bg-white rounded-lg border border-gray-200 p-5">
@@ -369,7 +383,7 @@ export default function Optimization() {
 
         <div className="flex-1 overflow-y-auto">
           {!optimizationResult ? (
-            <EmptyState />
+            <EmptyState isGenerating={isGenerating} />
           ) : (
             <div className="p-6 space-y-6">
               <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
