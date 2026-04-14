@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useOptimize } from '@/hooks/useApi';
 import { OptimizationParams, DeleteStopRequest } from '@/lib/types';
+import Link from 'next/link';
 
 /**
  * Demo component showing how to use the optimization API
@@ -37,12 +38,23 @@ export default function OptimizationForm() {
       <div className="max-w-6xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            Route Optimization
-          </h1>
-          <p className="text-gray-600">
-            Upload orders and assets to optimize delivery routes
-          </p>
+          <div className="flex justify-between items-center mb-4">
+            <div></div>
+            <div>
+              <h1 className="text-4xl font-bold text-gray-900 mb-2">
+                Route Optimization
+              </h1>
+              <p className="text-gray-600">
+                Upload orders and assets to optimize delivery routes
+              </p>
+            </div>
+            <Link
+              href="/settings"
+              className="bg-gray-600 text-white px-4 py-2 rounded-md font-medium hover:bg-gray-700 transition-colors"
+            >
+              Settings
+            </Link>
+          </div>
         </div>
 
         <div className="grid gap-8 lg:grid-cols-2">

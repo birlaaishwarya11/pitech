@@ -70,7 +70,7 @@ export default function ParametersPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -99,7 +99,9 @@ export default function ParametersPage() {
           </div>
         )}
 
-        {/* Parameters Form */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Parameters Form - Left 2 columns */}
+          <div className="lg:col-span-2">
         <div className="bg-white rounded-lg shadow space-y-6 p-6">
           {/* Solver - Wave 1 */}
           <div className="border-b pb-6">
@@ -376,6 +378,54 @@ export default function ParametersPage() {
           >
             {loading ? 'Saving...' : 'Save Parameters'}
           </button>
+        </div>
+        </div>
+
+          {/* Parameter Explanations - Right column */}
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-lg shadow p-6 sticky top-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Parameter Explanations
+              </h3>
+              <div className="space-y-4 text-sm">
+                <div>
+                  <h4 className="font-medium text-gray-800">Solver — Wave 1</h4>
+                  <ul className="mt-2 space-y-2 text-gray-600">
+                    <li><strong>Time Limit:</strong> Maximum time the solver can run for initial optimization (10-600 seconds)</li>
+                    <li><strong>Max Vehicle Time:</strong> Maximum hours a vehicle can be on the road (60-1440 minutes)</li>
+                    <li><strong>Max Waiting Time:</strong> Maximum idle time allowed at stops (0-600 minutes)</li>
+                    <li><strong>Drop Penalty:</strong> Higher values prioritize assigning all orders over optimal routing</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h4 className="font-medium text-gray-800">Solver — Wave 2</h4>
+                  <ul className="mt-2 space-y-2 text-gray-600">
+                    <li><strong>Reload Buffer:</strong> Depot turnaround time between first and second dispatch waves (0-120 minutes)</li>
+                    <li><strong>Wave 2 Cutoff:</strong> Latest time second dispatch can start (300-1440 minutes from midnight)</li>
+                    <li><strong>Wave 2 Time Limit:</strong> Time limit for second dispatch optimization (10-300 seconds)</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h4 className="font-medium text-gray-800">Depot & Service Time</h4>
+                  <ul className="mt-2 space-y-2 text-gray-600">
+                    <li><strong>Depot Opening:</strong> Earliest departure time from depot (0-1440 minutes from midnight)</li>
+                    <li><strong>Depot Closing:</strong> Latest return time to depot (0-1440 minutes from midnight)</li>
+                    <li><strong>Service Time:</strong> Time spent unloading at each delivery location (5-120 minutes)</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h4 className="font-medium text-gray-800">Routing & Distance</h4>
+                  <ul className="mt-2 space-y-2 text-gray-600">
+                    <li><strong>Use ORS:</strong> Use real road routing (OpenRouteService) or straight-line distance (Haversine)</li>
+                    <li><strong>ORS Batch Size:</strong> Number of locations processed per API call (10-100)</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
