@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Optional
 
 
 class OrderRecord(BaseModel):
@@ -11,16 +12,16 @@ class OrderRecord(BaseModel):
     zip_code: str
     latitude: float
     longitude: float
-    open_time: int       # minutes from midnight
-    close_time: int      # minutes from midnight
-    service_time: int    # minutes
-    total_pallets: int   # scaled by PALLET_SCALE
+    open_time: int
+    close_time: int
+    service_time: int
+    total_pallets: int
     weight: float
     order_type: str
     county: str
     delivery_instructions: str
     standing_appointment: bool
-    original_index: int  # row index in the CSV
+    original_index: int
 
 
 class GroupedStop(BaseModel):
@@ -33,21 +34,32 @@ class GroupedStop(BaseModel):
     name: str
     latitude: float
     longitude: float
-    open_time: int           # tightest window start (max of all opens)
-    close_time: int          # tightest window end (min of all closes)
-    service_time: int        # single service time (one physical stop)
-    total_pallets: int       # sum of all orders' pallets (scaled)
+    open_time: int
+    close_time: int
+    service_time: int
+    total_pallets: int
     total_weight: float
     county: str
-    order_indices: list[int]  # indices into the orders list
-    order_types: list[str]    # e.g. ["Dry"] or ["Cold"] — never mixed
-    is_large_order: bool = False   # True when stop was split from an oversized address
-    special_note: str = ""         # pass-through note from special instructions
+    order_indices: list[int]
+    order_types: list[str]
+    is_large_order: bool = False
+    special_note: str = ""
 
 
 class VehicleRecord(BaseModel):
     name: str
-    capacity: int  # scaled by PALLET_SCALE
+    capacity: int
+
+
+class DepotInfo(BaseModel):
+    name: str
+    latitude: float
+    longitude: float
+
+
+class RouteGeometry(BaseModel):
+    type: str
+    coordinates: list[list[float]]  # GeoJSON: [lng, lat]
 
 
 class StopResult(BaseModel):
@@ -62,6 +74,8 @@ class StopResult(BaseModel):
     arrival_time_minutes: int
     pallets: float
     order_types: list[str]
+    latitude: float
+    longitude: float
 
 
 class RouteResult(BaseModel):
@@ -71,6 +85,7 @@ class RouteResult(BaseModel):
     total_pallets: float
     num_stops: int
     stops: list[StopResult]
+    geometry: Optional[RouteGeometry] = None
 
 
 class OptimizationResponse(BaseModel):
@@ -82,5 +97,6 @@ class OptimizationResponse(BaseModel):
     unassigned_orders: int
     routes_used: int
     vehicles_available: int
+    depot: DepotInfo
     routes: list[RouteResult]
     unassigned: list[dict]

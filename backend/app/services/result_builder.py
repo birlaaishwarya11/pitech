@@ -5,8 +5,9 @@ import pandas as pd
 from app.config import settings
 from app.models.schemas import (
     OrderRecord, GroupedStop, VehicleRecord,
-    OptimizationResponse, RouteResult, StopResult,
+    OptimizationResponse, RouteResult, StopResult, DepotInfo,
 )
+from app.services.route_geometry import build_route_geometry
 
 
 def _minutes_to_time_str(minutes: int) -> str:
@@ -15,6 +16,98 @@ def _minutes_to_time_str(minutes: int) -> str:
     m = minutes % 60
     return f"{h:02d}:{m:02d}"
 
+
+# def build_response(
+#     orders: list[OrderRecord],
+#     stops: list[GroupedStop],
+#     vehicles: list[VehicleRecord],
+#     solver_result: dict,
+# ) -> OptimizationResponse:
+#     """Build the API response from solver results."""
+#     routes_data = solver_result["routes"]
+#     dropped_stop_indices = solver_result["dropped"]
+#     wave2_vehicle_ids = solver_result.get("wave2_vehicle_ids", set())
+#
+#     route_results = []
+#     route_number = 1
+#     total_assigned_orders = 0
+#
+#     for vehicle_id, route_stops in routes_data.items():
+#         vehicle = vehicles[vehicle_id]
+#         # For vehicles that ran both waves, split stops by wave
+#         w1_stops = [s for s in route_stops if s.get("wave", 1) == 1]
+#         w2_stops = [s for s in route_stops if s.get("wave", 1) == 2]
+#
+#         def _make_route(wave_stops, wave_num):
+#             nonlocal route_number, total_assigned_orders
+#             total_pallets_scaled = sum(stops[s["stop_idx"]].total_pallets for s in wave_stops)
+#             stop_results = []
+#             for s in wave_stops:
+#                 stop = stops[s["stop_idx"]]
+#                 wo_numbers = [orders[i].work_order_number for i in stop.order_indices]
+#                 cust = orders[stop.order_indices[0]].customer_number
+#                 total_assigned_orders += len(stop.order_indices)
+#                 stop_results.append(StopResult(
+#                     seq=s["seq"],
+#                     work_order_numbers=wo_numbers,
+#                     customer_number=cust,
+#                     name=stop.name,
+#                     address=stop.address,
+#                     city=stop.city,
+#                     state=stop.state,
+#                     zip_code=stop.zip_code,
+#                     arrival_time_minutes=s["arrival"],
+#                     pallets=round(stop.total_pallets / settings.PALLET_SCALE, 2),
+#                     order_types=stop.order_types,
+#                 ))
+#             label = f"W{wave_num}-{route_number}" if wave_num == 2 else str(route_number)
+#             route_results.append(RouteResult(
+#                 route_number=route_number,
+#                 vehicle=f"{vehicle.name} (Wave {wave_num})" if wave_num == 2 else vehicle.name,
+#                 vehicle_capacity_pallets=round(vehicle.capacity / settings.PALLET_SCALE, 2),
+#                 total_pallets=round(total_pallets_scaled / settings.PALLET_SCALE, 2),
+#                 num_stops=len(wave_stops),
+#                 stops=stop_results,
+#             ))
+#             route_number += 1
+#
+#         if w1_stops:
+#             _make_route(w1_stops, 1)
+#         if w2_stops:
+#             _make_route(w2_stops, 2)
+#         # Vehicle only in wave2 (was idle in wave1)
+#         if not w1_stops and not w2_stops and route_stops:
+#             wave_num = 2 if vehicle_id in wave2_vehicle_ids else 1
+#             _make_route(route_stops, wave_num)
+#
+#     # Unassigned
+#     unassigned_orders = 0
+#     unassigned_list = []
+#     for stop_idx in dropped_stop_indices:
+#         stop = stops[stop_idx]
+#         unassigned_orders += len(stop.order_indices)
+#         wo_numbers = [orders[i].work_order_number for i in stop.order_indices]
+#         unassigned_list.append({
+#             "work_order_numbers": wo_numbers,
+#             "name": stop.name,
+#             "address": f"{stop.address}, {stop.city}, {stop.state} {stop.zip_code}",
+#             "pallets": round(stop.total_pallets / settings.PALLET_SCALE, 2),
+#             "order_types": stop.order_types,
+#             "reason": "Could not fit within time/capacity constraints",
+#         })
+#
+#     return OptimizationResponse(
+#         status=solver_result["status"],
+#         solver_status=solver_result["solver_status"],
+#         total_orders=len(orders),
+#         total_stops=len(stops),
+#         assigned_orders=total_assigned_orders,
+#         unassigned_orders=unassigned_orders,
+#         routes_used=len(route_results),
+#         vehicles_available=len(vehicles),
+#         routes=route_results,
+#         unassigned=unassigned_list,
+#     )
 
 def build_response(
     orders: list[OrderRecord],
@@ -33,47 +126,66 @@ def build_response(
 
     for vehicle_id, route_stops in routes_data.items():
         vehicle = vehicles[vehicle_id]
+
         # For vehicles that ran both waves, split stops by wave
         w1_stops = [s for s in route_stops if s.get("wave", 1) == 1]
         w2_stops = [s for s in route_stops if s.get("wave", 1) == 2]
 
         def _make_route(wave_stops, wave_num):
             nonlocal route_number, total_assigned_orders
-            total_pallets_scaled = sum(stops[s["stop_idx"]].total_pallets for s in wave_stops)
+
+            ordered_wave_stops = sorted(wave_stops, key=lambda s: s["seq"])
+            ordered_grouped_stops = [stops[s["stop_idx"]] for s in ordered_wave_stops]
+
+            total_pallets_scaled = sum(
+                stop.total_pallets for stop in ordered_grouped_stops
+            )
+
+            route_geometry = build_route_geometry(ordered_grouped_stops)
+
             stop_results = []
-            for s in wave_stops:
-                stop = stops[s["stop_idx"]]
+            for s, stop in zip(ordered_wave_stops, ordered_grouped_stops):
                 wo_numbers = [orders[i].work_order_number for i in stop.order_indices]
                 cust = orders[stop.order_indices[0]].customer_number
                 total_assigned_orders += len(stop.order_indices)
-                stop_results.append(StopResult(
-                    seq=s["seq"],
-                    work_order_numbers=wo_numbers,
-                    customer_number=cust,
-                    name=stop.name,
-                    address=stop.address,
-                    city=stop.city,
-                    state=stop.state,
-                    zip_code=stop.zip_code,
-                    arrival_time_minutes=s["arrival"],
-                    pallets=round(stop.total_pallets / settings.PALLET_SCALE, 2),
-                    order_types=stop.order_types,
-                ))
-            label = f"W{wave_num}-{route_number}" if wave_num == 2 else str(route_number)
-            route_results.append(RouteResult(
-                route_number=route_number,
-                vehicle=f"{vehicle.name} (Wave {wave_num})" if wave_num == 2 else vehicle.name,
-                vehicle_capacity_pallets=round(vehicle.capacity / settings.PALLET_SCALE, 2),
-                total_pallets=round(total_pallets_scaled / settings.PALLET_SCALE, 2),
-                num_stops=len(wave_stops),
-                stops=stop_results,
-            ))
+
+                stop_results.append(
+                    StopResult(
+                        seq=s["seq"],
+                        work_order_numbers=wo_numbers,
+                        customer_number=cust,
+                        name=stop.name,
+                        address=stop.address,
+                        city=stop.city,
+                        state=stop.state,
+                        zip_code=stop.zip_code,
+                        arrival_time_minutes=s["arrival"],
+                        pallets=round(stop.total_pallets / settings.PALLET_SCALE, 2),
+                        order_types=stop.order_types,
+                        latitude=stop.latitude,
+                        longitude=stop.longitude,
+                    )
+                )
+
+            route_results.append(
+                RouteResult(
+                    route_number=route_number,
+                    vehicle=f"{vehicle.name} (Wave {wave_num})" if wave_num == 2 else vehicle.name,
+                    vehicle_capacity_pallets=round(vehicle.capacity / settings.PALLET_SCALE, 2),
+                    total_pallets=round(total_pallets_scaled / settings.PALLET_SCALE, 2),
+                    num_stops=len(ordered_wave_stops),
+                    stops=stop_results,
+                    geometry=route_geometry,
+                )
+            )
+
             route_number += 1
 
         if w1_stops:
             _make_route(w1_stops, 1)
         if w2_stops:
             _make_route(w2_stops, 2)
+
         # Vehicle only in wave2 (was idle in wave1)
         if not w1_stops and not w2_stops and route_stops:
             wave_num = 2 if vehicle_id in wave2_vehicle_ids else 1
@@ -104,10 +216,14 @@ def build_response(
         unassigned_orders=unassigned_orders,
         routes_used=len(route_results),
         vehicles_available=len(vehicles),
+        depot=DepotInfo(
+            name="Food Bank Depot",
+            latitude=settings.DEPOT_LAT,
+            longitude=settings.DEPOT_LNG,
+        ),
         routes=route_results,
         unassigned=unassigned_list,
     )
-
 
 def build_csv_output(
     orders: list[OrderRecord],

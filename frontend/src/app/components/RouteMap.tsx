@@ -1,240 +1,430 @@
-import { MapPin, Navigation, Building2 } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
+import {
+  CircleMarker,
+  MapContainer,
+  Polyline,
+  Popup,
+  TileLayer,
+  Tooltip,
+  useMap,
+} from "react-leaflet";
 
-interface Stop {
-  id: string;
-  number: number;
-  agencyName: string;
-  deliveryWindow: string;
+interface OptimizationStopResult {
+  seq: number;
+  work_order_numbers: string[];
+  customer_number: string;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  arrival_time_minutes: number;
   pallets: number;
-  estimatedArrival: string;
-  lat: number;
-  lng: number;
-  vehicleId: string;
+  order_types: string[];
+  latitude: number;
+  longitude: number;
 }
 
-interface Route {
-  vehicleId: string;
-  color: string;
-  stops: Stop[];
+interface RouteGeometry {
+  type: string;
+  coordinates: number[][];
+}
+
+interface OptimizationRouteResult {
+  route_number: number;
+  vehicle: string;
+  vehicle_capacity_pallets: number;
+  total_pallets: number;
+  num_stops: number;
+  stops: OptimizationStopResult[];
+  geometry?: RouteGeometry | null;
+}
+
+interface DepotInfo {
+  name: string;
+  latitude: number;
+  longitude: number;
 }
 
 interface RouteMapProps {
-  routes: Route[];
-  hasRoutes: boolean;
-  onStopClick: (stop: Stop) => void;
+  depot: DepotInfo;
+  routes: OptimizationRouteResult[];
 }
 
-export function RouteMap({ routes, hasRoutes, onStopClick }: RouteMapProps) {
-  const [hoveredStop, setHoveredStop] = useState<Stop | null>(null);
-  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
+interface RouteOption {
+  value: string;
+  label: string;
+}
 
-  const handleStopHover = (stop: Stop | null, event?: React.MouseEvent) => {
-    setHoveredStop(stop);
-    if (event) {
-      setHoverPosition({ x: event.clientX, y: event.clientY });
-    }
-  };
+const routeColors = [
+  "#2563eb",
+  "#dc2626",
+  "#16a34a",
+  "#9333ea",
+  "#ea580c",
+  "#0891b2",
+  "#4f46e5",
+];
 
-  if (!hasRoutes) {
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 h-[500px] flex items-center justify-center">
-        <div className="text-center">
-          <div className="size-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-            <Navigation className="size-8 text-gray-400" />
-          </div>
-          <p className="text-base font-medium text-gray-900 mb-1">
-            No routes generated yet
-          </p>
-          <p className="text-sm text-gray-600">
-            Upload orders and click "Generate Routes" to begin
-          </p>
-        </div>
-      </div>
-    );
-  }
+function FitBounds({ bounds }: { bounds: LatLngBoundsExpression }) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.fitBounds(bounds, { padding: [40, 40] });
+  }, [map, bounds]);
+
+  return null;
+}
+
+function FocusStop({
+  stop,
+}: {
+  stop: OptimizationStopResult | null;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!stop) return;
+    map.setView([stop.latitude, stop.longitude], 13, { animate: true });
+  }, [map, stop]);
+
+  return null;
+}
+
+function formatMinutesToTime(minutes: number) {
+  if (!Number.isFinite(minutes)) return "N/A";
+
+  const totalMinutes = Math.round(minutes);
+  const hours24 = Math.floor(totalMinutes / 60) % 24;
+  const mins = totalMinutes % 60;
+
+  const period = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+
+  return `${hours12}:${mins.toString().padStart(2, "0")} ${period}`;
+}
+
+function renderStopMarker(
+  route: OptimizationRouteResult,
+  stop: OptimizationStopResult,
+  color: string,
+  selectedRouteValue: string,
+  focusedStopKey: string | null,
+  handleStopSelect: (routeNumber: number, stopSeq: number) => void
+) {
+  const stopKey = `${route.route_number}-${stop.seq}`;
+  const isFocused = stopKey === focusedStopKey;
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 h-[500px] relative overflow-hidden">
-      {/* Mock Map Background - NYC-style */}
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-100 via-gray-100 to-stone-100">
-        {/* Grid lines for city streets */}
-        <svg className="absolute inset-0 w-full h-full opacity-20">
-          <defs>
-            <pattern
-              id="grid"
-              width="40"
-              height="40"
-              patternUnits="userSpaceOnUse"
-            >
-              <path
-                d="M 40 0 L 0 0 0 40"
-                fill="none"
-                stroke="gray"
-                strokeWidth="1"
-              />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-        </svg>
-        
-        {/* Water/park areas */}
-        <div className="absolute top-10 right-10 w-32 h-24 bg-blue-100 rounded-xl opacity-40" />
-        <div className="absolute bottom-16 left-16 w-28 h-28 bg-green-100 rounded-full opacity-40" />
-      </div>
-
-      {/* Depot/Warehouse Marker */}
-      <div className="absolute transform -translate-x-1/2 -translate-y-1/2 z-10"
-        style={{ left: "15%", top: "15%" }}
+    <CircleMarker
+      key={`${route.route_number}-${stop.seq}-${stop.customer_number}-${isFocused ? "focused" : "normal"}`}
+      center={[stop.latitude, stop.longitude]}
+      radius={isFocused ? 13 : selectedRouteValue === "all" ? 8 : 10}
+      pathOptions={{
+        color,
+        fillColor: color,
+        fillOpacity: 1,
+        weight: isFocused ? 5 : 2,
+      }}
+      eventHandlers={{
+        click: () => handleStopSelect(route.route_number, stop.seq),
+      }}
+    >
+      <Tooltip
+        permanent
+        direction="top"
+        offset={isFocused ? [0, -10] : [0, -6]}
+        className={isFocused ? "route-seq-tooltip font-bold" : "route-seq-tooltip"}
       >
-        <div className="relative group">
-          <div className="size-12 rounded-lg bg-gray-800 flex items-center justify-center shadow-lg">
-            <Building2 className="size-6 text-white" />
+        {String(stop.seq)}
+      </Tooltip>
+
+      <Popup>
+        <div className="text-sm space-y-1 min-w-[240px]">
+          <div className="font-semibold">
+            Route {route.route_number} · Stop {stop.seq}
           </div>
-          <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-            Food Bank Depot
+          <div className="text-gray-700">Vehicle: {route.vehicle}</div>
+          <div className="font-medium">{stop.name}</div>
+          <div>
+            {stop.address}, {stop.city}, {stop.state} {stop.zip_code}
           </div>
+          <div>
+            Arrival: {formatMinutesToTime(stop.arrival_time_minutes)}
+          </div>
+          <div>Pallets: {stop.pallets}</div>
+          <div>Customer number: {stop.customer_number}</div>
+          <div>
+            Order types:{" "}
+            {stop.order_types?.length ? stop.order_types.join(", ") : "N/A"}
+          </div>
+          <div>
+            Work orders:{" "}
+            {stop.work_order_numbers?.length
+              ? stop.work_order_numbers.join(", ")
+              : "N/A"}
+          </div>
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${stop.latitude},${stop.longitude}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-block pt-1 text-blue-600 underline"
+          >
+            Open in Google Maps
+          </a>
         </div>
+      </Popup>
+    </CircleMarker>
+  );
+}
+
+export function RouteMap({ depot, routes }: RouteMapProps) {
+  const [selectedRouteValue, setSelectedRouteValue] = useState<string>("all");
+  const [focusedStopKey, setFocusedStopKey] = useState<string | null>(null);
+
+  const depotPosition: LatLngExpression = [depot.latitude, depot.longitude];
+
+  const routeOptions = useMemo<RouteOption[]>(() => {
+    return [
+      { value: "all", label: "All routes" },
+      ...routes.map((route) => ({
+        value: String(route.route_number),
+        label: `Route ${route.route_number} · ${route.vehicle}`,
+      })),
+    ];
+  }, [routes]);
+
+  const visibleRoutes = useMemo(() => {
+    if (selectedRouteValue === "all") {
+      return routes;
+    }
+
+    return routes.filter(
+      (route) => String(route.route_number) === selectedRouteValue
+    );
+  }, [routes, selectedRouteValue]);
+
+  const selectedSingleRoute = useMemo(() => {
+    if (selectedRouteValue === "all") return null;
+    return (
+      routes.find(
+        (route) => String(route.route_number) === selectedRouteValue
+      ) ?? null
+    );
+  }, [routes, selectedRouteValue]);
+
+  const focusedStop = useMemo(() => {
+    if (!focusedStopKey || !selectedSingleRoute) return null;
+
+    return (
+      selectedSingleRoute.stops.find(
+        (stop) =>
+          `${selectedSingleRoute.route_number}-${stop.seq}` === focusedStopKey
+      ) ?? null
+    );
+  }, [focusedStopKey, selectedSingleRoute]);
+
+  const handleRouteSelect = (routeNumber: number) => {
+    setSelectedRouteValue(String(routeNumber));
+    setFocusedStopKey(null);
+  };
+
+  const handleStopSelect = (routeNumber: number, stopSeq: number) => {
+    setSelectedRouteValue(String(routeNumber));
+    setFocusedStopKey(`${routeNumber}-${stopSeq}`);
+  };
+
+  const bounds = useMemo<LatLngBoundsExpression>(() => {
+    const points: [number, number][] = [[depot.latitude, depot.longitude]];
+
+    visibleRoutes.forEach((route) => {
+      route.stops.forEach((stop) => {
+        points.push([stop.latitude, stop.longitude]);
+      });
+    });
+
+    return points;
+  }, [depot, visibleRoutes]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <label
+          htmlFor="route-filter"
+          className="text-sm font-medium text-gray-700"
+        >
+          Show route
+        </label>
+
+        <select
+          id="route-filter"
+          value={selectedRouteValue}
+          onChange={(e) => {
+            setSelectedRouteValue(e.target.value);
+            setFocusedStopKey(null);
+          }}
+          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+        >
+          {routeOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Routes and Stops */}
-      <div className="absolute inset-0 p-8">
-        {routes.map((route) => (
-          <div key={route.vehicleId}>
-            {/* Route Path */}
-            <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              {/* Line from depot to first stop */}
-              {route.stops.length > 0 && (
-                <line
-                  x1="15%"
-                  y1="15%"
-                  x2={`${route.stops[0].lng}%`}
-                  y2={`${route.stops[0].lat}%`}
-                  stroke={route.color}
-                  strokeWidth="3"
-                  strokeDasharray="8,4"
-                  opacity="0.5"
-                />
-              )}
-              
-              {route.stops.map((stop, idx) => {
-                if (idx === route.stops.length - 1) return null;
-                const nextStop = route.stops[idx + 1];
+      {selectedSingleRoute && (
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mb-3">
+            <h3 className="text-sm font-semibold text-gray-900">
+              Stops for Route {selectedSingleRoute.route_number}
+            </h3>
+            <p className="text-sm text-gray-600">
+              Click a stop to jump to it on the map.
+            </p>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto rounded-md border border-gray-200">
+            <div className="divide-y divide-gray-200">
+              {selectedSingleRoute.stops.map((stop) => {
+                const stopKey = `${selectedSingleRoute.route_number}-${stop.seq}`;
+                const isFocused = stopKey === focusedStopKey;
+
                 return (
-                  <line
-                    key={`${stop.id}-${nextStop.id}`}
-                    x1={`${stop.lng}%`}
-                    y1={`${stop.lat}%`}
-                    x2={`${nextStop.lng}%`}
-                    y2={`${nextStop.lat}%`}
-                    stroke={route.color}
-                    strokeWidth="3"
-                    strokeDasharray="8,4"
-                    opacity="0.6"
-                  />
+                  <button
+                    key={stopKey}
+                    type="button"
+                    onClick={() =>
+                      handleStopSelect(selectedSingleRoute.route_number, stop.seq)
+                    }
+                    className={`w-full px-4 py-3 text-left transition ${
+                      isFocused ? "bg-blue-50" : "bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {stop.seq}. {stop.name}
+                        </div>
+                        <div className="mt-1 text-sm text-gray-600">
+                          {stop.address}, {stop.city}, {stop.state} {stop.zip_code}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-xs text-gray-500">
+                        {formatMinutesToTime(stop.arrival_time_minutes)}
+                      </div>
+                    </div>
+                  </button>
                 );
               })}
-            </svg>
-
-            {/* Stops */}
-            {route.stops.map((stop) => (
-              <div
-                key={stop.id}
-                className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer group z-20"
-                style={{
-                  left: `${stop.lng}%`,
-                  top: `${stop.lat}%`,
-                }}
-                onMouseEnter={(e) => handleStopHover(stop, e)}
-                onMouseLeave={() => handleStopHover(null)}
-                onClick={() => onStopClick(stop)}
-              >
-                <div
-                  className="size-10 rounded-full flex items-center justify-center text-white text-sm font-semibold shadow-lg transition-all group-hover:scale-125 group-hover:shadow-xl border-2 border-white"
-                  style={{ backgroundColor: route.color }}
-                >
-                  {stop.number}
-                </div>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-
-      {/* Map Legend */}
-      <div className="absolute bottom-4 left-4 bg-white rounded-lg shadow-lg border border-gray-200 p-3">
-        <p className="text-xs font-semibold text-gray-900 mb-2">Routes</p>
-        <div className="space-y-1.5">
-          {routes.map((route) => (
-            <div key={route.vehicleId} className="flex items-center gap-2">
-              <div
-                className="size-3 rounded-full"
-                style={{ backgroundColor: route.color }}
-              />
-              <span className="text-xs text-gray-700">{route.vehicleId}</span>
-              <span className="text-xs text-gray-500">
-                ({route.stops.length} stops)
-              </span>
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Hover Card */}
-      {hoveredStop && (
-        <div
-          className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 p-4 w-64 pointer-events-none"
-          style={{
-            left: hoverPosition.x + 15,
-            top: hoverPosition.y + 15,
-          }}
-        >
-          <div className="flex items-start gap-3 mb-3">
-            <div className="size-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-              <MapPin className="size-4 text-blue-600" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-gray-900 leading-tight">
-                {hoveredStop.agencyName}
-              </p>
-              <p className="text-xs text-gray-600 mt-0.5">
-                Stop #{hoveredStop.number}
-              </p>
-            </div>
-          </div>
-          
-          <div className="space-y-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Assigned Truck:</span>
-              <span className="font-medium text-gray-900">
-                {hoveredStop.vehicleId}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Delivery Window:</span>
-              <span className="font-medium text-gray-900">
-                {hoveredStop.deliveryWindow}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Pallets:</span>
-              <span className="font-medium text-gray-900">
-                {hoveredStop.pallets}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Est. Arrival:</span>
-              <span className="font-medium text-gray-900">
-                {hoveredStop.estimatedArrival}
-              </span>
-            </div>
-          </div>
-          
-          <div className="mt-3 pt-3 border-t border-gray-200">
-            <p className="text-xs text-blue-600 font-medium">Click to edit stop</p>
           </div>
         </div>
       )}
+
+      <div className="h-[520px] w-full">
+        <MapContainer
+          center={depotPosition}
+          zoom={11}
+          scrollWheelZoom={true}
+          className="h-full w-full"
+        >
+          <TileLayer
+            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+
+          <FitBounds bounds={bounds} />
+          <FocusStop stop={focusedStop} />
+
+          <CircleMarker
+            center={depotPosition}
+            radius={10}
+            pathOptions={{
+              color: "#111827",
+              fillColor: "#111827",
+              fillOpacity: 1,
+            }}
+          >
+            <Tooltip permanent direction="top" offset={[0, -8]}>
+              Depot
+            </Tooltip>
+            <Popup>
+              <div className="text-sm">
+                <div className="font-semibold">{depot.name}</div>
+                <div>
+                  {depot.latitude}, {depot.longitude}
+                </div>
+              </div>
+            </Popup>
+          </CircleMarker>
+
+          {visibleRoutes.map((route, routeIndex) => {
+            const color = routeColors[routeIndex % routeColors.length];
+
+            const polylinePositions: [number, number][] =
+              route.geometry?.coordinates?.length
+                ? route.geometry.coordinates.map(([lng, lat]) => [lat, lng])
+                : [
+                    [depot.latitude, depot.longitude],
+                    ...route.stops.map(
+                      (stop) =>
+                        [stop.latitude, stop.longitude] as [number, number]
+                    ),
+                    [depot.latitude, depot.longitude],
+                  ];
+
+            return (
+              <Fragment key={route.route_number}>
+                {polylinePositions.length > 1 && (
+                  <Polyline
+                    positions={polylinePositions}
+                    pathOptions={{
+                      color,
+                      weight: selectedRouteValue === "all" ? 5 : 7,
+                      opacity: selectedRouteValue === "all" ? 0.85 : 0.95,
+                    }}
+                    eventHandlers={{
+                      click: () => handleRouteSelect(route.route_number),
+                    }}
+                  />
+                )}
+
+                {route.stops
+                  .filter(
+                    (stop) => `${route.route_number}-${stop.seq}` !== focusedStopKey
+                  )
+                  .map((stop) =>
+                    renderStopMarker(
+                      route,
+                      stop,
+                      color,
+                      selectedRouteValue,
+                      focusedStopKey,
+                      handleStopSelect
+                    )
+                  )}
+
+                {route.stops
+                  .filter(
+                    (stop) => `${route.route_number}-${stop.seq}` === focusedStopKey
+                  )
+                  .map((stop) =>
+                    renderStopMarker(
+                      route,
+                      stop,
+                      color,
+                      selectedRouteValue,
+                      focusedStopKey,
+                      handleStopSelect
+                    )
+                  )}
+              </Fragment>
+            );
+          })}
+        </MapContainer>
+      </div>
     </div>
   );
 }

@@ -4,7 +4,18 @@ import { UploadOrders } from "./components/UploadOrders";
 import { EmptyState } from "./components/EmptyState";
 import { toast } from "sonner";
 import { Toaster } from "./components/ui/sonner";
+import { RouteMap } from "./components/RouteMap";
 
+interface DepotInfo {
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+interface RouteGeometry {
+  type: string;
+  coordinates: number[][];
+}
 
 interface OptimizationStopResult {
   seq: number;
@@ -18,6 +29,8 @@ interface OptimizationStopResult {
   arrival_time_minutes: number;
   pallets: number;
   order_types: string[];
+  latitude: number;
+  longitude: number;
 }
 
 interface OptimizationRouteResult {
@@ -27,6 +40,7 @@ interface OptimizationRouteResult {
   total_pallets: number;
   num_stops: number;
   stops: OptimizationStopResult[];
+  geometry?: RouteGeometry | null;
 }
 
 interface OptimizationResponse {
@@ -38,6 +52,7 @@ interface OptimizationResponse {
   unassigned_orders: number;
   routes_used: number;
   vehicles_available: number;
+  depot: DepotInfo;
   routes: OptimizationRouteResult[];
   unassigned: Record<string, unknown>[];
 }
@@ -351,6 +366,25 @@ export default function App() {
             <EmptyState />
           ) : (
             <div className="p-6 space-y-6">
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-6 pt-6 pb-3">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Route map
+                  </h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Optimized routes displayed on the map using road-following
+                    geometry.
+                  </p>
+                </div>
+
+                <div className="px-6 pb-6">
+                  <RouteMap
+                    depot={optimizationResult.depot}
+                    routes={optimizationResult.routes}
+                  />
+                </div>
+              </div>
+
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <div className="flex items-center justify-between mb-6">
                   <div>
@@ -359,8 +393,8 @@ export default function App() {
                     </h2>
                     <p className="text-sm text-gray-600 mt-1">
                       Optimization completed successfully. Download the route
-                      plan to review vehicle assignments, stop sequence, pallets,
-                      and estimated arrival times.
+                      plan to review vehicle assignments, stop sequence,
+                      pallets, and estimated arrival times.
                     </p>
                   </div>
 
