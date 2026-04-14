@@ -141,7 +141,7 @@ def build_response(
                 stop.total_pallets for stop in ordered_grouped_stops
             )
 
-            route_geometry = build_route_geometry(ordered_grouped_stops)
+            route_geometry, route_distance_km = build_route_geometry(ordered_grouped_stops)
 
             stop_results = []
             for s, stop in zip(ordered_wave_stops, ordered_grouped_stops):
@@ -167,6 +167,9 @@ def build_response(
                     )
                 )
 
+            # finish_time is the same for all stops on the route (set by solver)
+            finish_time = ordered_wave_stops[-1].get("finish_time") if ordered_wave_stops else None
+
             route_results.append(
                 RouteResult(
                     route_number=route_number,
@@ -174,6 +177,8 @@ def build_response(
                     vehicle_capacity_pallets=round(vehicle.capacity / settings.PALLET_SCALE, 2),
                     total_pallets=round(total_pallets_scaled / settings.PALLET_SCALE, 2),
                     num_stops=len(ordered_wave_stops),
+                    total_distance_km=route_distance_km,
+                    finish_time_minutes=finish_time,
                     stops=stop_results,
                     geometry=route_geometry,
                 )

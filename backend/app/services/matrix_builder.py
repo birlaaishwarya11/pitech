@@ -1,13 +1,15 @@
 import hashlib
 import json
+import logging
 import math
-import os
 from pathlib import Path
 
 import openrouteservice
 
 from app.config import settings
-from app.models.schemas import GroupedStop, OrderRecord
+from app.models.schemas import GroupedStop
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / ".matrix_cache"
 
@@ -38,7 +40,6 @@ def build_unique_locations_from_stops(
         unique_locations: list of (lng, lat) — index 0 is the depot
         stop_to_location: mapping from stop index to unique location index
     """
-    # Index 0 = depot
     unique_locations = [(settings.DEPOT_LNG, settings.DEPOT_LAT)]
     coord_to_index: dict[tuple[float, float], int] = {
         (settings.DEPOT_LNG, settings.DEPOT_LAT): 0
@@ -108,32 +109,31 @@ def build_matrix_ors(
     unique_locations: list[tuple[float, float]],
 ) -> tuple[list[list[int]], list[list[int]]]:
     """
-    Build distance and duration matrices using OpenRouteService Matrix API.
-    Batches requests to stay within API limits.
+    Build distance and duration matrices using the self-hosted ORS Matrix API.
     Results are cached to disk.
     """
     cache_key = _cache_key(unique_locations)
     cached = _load_cache(cache_key)
     if cached is not None:
-        # Convert to int lists
         distances = [[int(v) if v is not None else 999999 for v in row] for row in cached[0]]
         durations = [[int(v) if v is not None else 999999 for v in row] for row in cached[1]]
         return distances, durations
 
-    if not settings.ORS_API_KEY or settings.ORS_API_KEY == "your_openrouteservice_api_key_here":
-        raise ValueError(
-            "ORS_API_KEY not configured. Set it in .env or use Haversine fallback."
-        )
-
-    client = openrouteservice.Client(key=settings.ORS_API_KEY)
+    client = openrouteservice.Client(
+        key=None,
+        base_url=settings.ORS_BASE_URL,
+    )
     n = len(unique_locations)
-    batch_size = settings.ORS_MATRIX_BATCH_SIZE
 
     # ORS expects [[lng, lat], ...] format
     coords = [list(loc) for loc in unique_locations]
 
     all_distances = [[0] * n for _ in range(n)]
     all_durations = [[0] * n for _ in range(n)]
+
+    # Self-hosted ORS has no batch size limit, but we still chunk for
+    # very large sets to keep individual request payloads reasonable.
+    batch_size = min(n, 200)
 
     for src_start in range(0, n, batch_size):
         src_end = min(src_start + batch_size, n)
@@ -152,7 +152,6 @@ def build_matrix_ors(
             for j, dst_idx in enumerate(destinations):
                 dist_val = result["distances"][i][j]
                 dur_val = result["durations"][i][j]
-                # ORS returns None for unroutable pairs
                 all_distances[src_idx][dst_idx] = int(dist_val) if dist_val is not None else 999999
                 all_durations[src_idx][dst_idx] = int(dur_val) if dur_val is not None else 999999
 
@@ -163,15 +162,29 @@ def build_matrix_ors(
 def build_matrix(
     unique_locations: list[tuple[float, float]],
     use_ors: bool = True,
-) -> tuple[list[list[int]], list[list[int]]]:
+) -> tuple[list[list[int]], list[list[int]], list[str]]:
     """
     Build the distance/duration matrix.
     Tries ORS first, falls back to Haversine if ORS fails.
+
+    Returns:
+        (distance_matrix, duration_matrix, warnings)
+        warnings is a list of user-facing messages (empty on success).
     """
     if use_ors:
         try:
-            return build_matrix_ors(unique_locations)
+            d, t = build_matrix_ors(unique_locations)
+            return d, t, []
         except Exception as e:
-            print(f"ORS matrix failed ({e}), falling back to Haversine.")
-            return build_matrix_haversine(unique_locations)
-    return build_matrix_haversine(unique_locations)
+            msg = str(e)
+            logger.warning("ORS matrix failed, falling back to Haversine: %s", msg)
+            d, t = build_matrix_haversine(unique_locations)
+            warning = (
+                f"OpenRouteService matrix request failed: {msg}. "
+                "Distances and travel times are estimated using straight-line "
+                "approximations instead of actual roads. "
+                "Is the ORS container running? (docker compose up -d)"
+            )
+            return d, t, [warning]
+    d, t = build_matrix_haversine(unique_locations)
+    return d, t, []

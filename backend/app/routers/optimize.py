@@ -2,7 +2,6 @@ from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from typing import Optional
 import io
-import json
 
 from app.models.schemas import OptimizationResponse
 from app.services.csv_parser import parse_orders_csv, parse_assets_csv
@@ -11,9 +10,7 @@ from app.services.matrix_builder import build_unique_locations_from_stops, build
 from app.services.solver import solve_vrp
 from app.services.result_builder import build_response, build_csv_output
 from app.services.instructions_parser import parse_instructions
-from app.services.geocache import cache_stats
 from app.services.wave2 import plan_second_wave, merge_waves
-from app.config import Settings
 
 router = APIRouter(prefix="/api/v1", tags=["optimization"])
 
@@ -23,7 +20,10 @@ async def _run_optimization(
     assets_bytes: bytes,
     use_ors: bool,
     api_instructions: str = "",
-    settings_overrides: dict = None,
+    depot_open: int | None = None,
+    depot_close: int | None = None,
+    num_waves: int | None = None,
+    wave2_cutoff: int | None = None,
 ) -> tuple:
     """
     Shared optimization pipeline.
@@ -35,40 +35,31 @@ async def _run_optimization(
     Both are parsed before the solver runs, so skips/overrides/locks are
     applied during stop creation — the solver never sees excluded orders.
     """
-    # Apply settings overrides
-    if settings_overrides:
-        for key, value in settings_overrides.items():
-            if hasattr(settings, key):
-                setattr(settings, key, value)
-
-    # 1. Parse file — returns (orders, inline_instructions_from_file)
     orders, inline_instructions = parse_orders_csv(orders_bytes)
     vehicles = parse_assets_csv(assets_bytes)
 
-    # 2. Merge file-level + API-level instructions and parse into constraints
     combined_instructions = "\n".join(
         filter(None, [inline_instructions.strip(), api_instructions.strip()])
     )
     constraints = parse_instructions(combined_instructions)
 
-    # 3. Group orders by (address, order_type), apply skip/window constraints,
-    #    auto-split oversized loads, flag large orders
     stops = group_orders_into_stops(orders, vehicles, constraints)
 
-    # 4. Build distance/duration matrix
     unique_locations, stop_to_location = build_unique_locations_from_stops(stops)
-    _distance_matrix, duration_matrix = build_matrix(unique_locations, use_ors=use_ors)
+    _distance_matrix, duration_matrix, matrix_warnings = build_matrix(
+        unique_locations, use_ors=use_ors,
+    )
 
-    # 5. Solve CVRPTW — Wave 1
     solver_result = solve_vrp(
         stops=stops,
         vehicles=vehicles,
         duration_matrix=duration_matrix,
         stop_to_location=stop_to_location,
+        depot_open_minutes=depot_open,
+        depot_close_minutes=depot_close,
     )
 
-    # 6. Wave 2: send eligible trucks back for unassigned stops
-    if solver_result["dropped"]:
+    if solver_result["dropped"] and (num_waves is None or num_waves >= 2):
         wave2_result = plan_second_wave(
             dropped_stop_indices=solver_result["dropped"],
             stops=stops,
@@ -76,10 +67,12 @@ async def _run_optimization(
             wave1_routes=solver_result["routes"],
             duration_matrix=duration_matrix,
             stop_to_location=stop_to_location,
+            depot_open_minutes=depot_open,
+            wave2_cutoff_minutes=wave2_cutoff,
         )
         solver_result = merge_waves(solver_result, wave2_result)
 
-    return orders, stops, vehicles, solver_result, constraints
+    return orders, stops, vehicles, solver_result, constraints, matrix_warnings
 
 
 @router.post("/optimize", response_model=OptimizationResponse)
@@ -87,6 +80,10 @@ async def optimize_routes(
     orders_file: UploadFile = File(..., description="Orders CSV or XLS file"),
     assets_file: UploadFile = File(..., description="Asset/vehicle CSV file"),
     use_ors: bool = Query(True, description="Use OpenRouteService (True) or Haversine fallback (False)"),
+    depot_open: Optional[int] = Query(None, description="Depot open time in minutes from midnight (default 480 = 8:00 AM)"),
+    depot_close: Optional[int] = Query(None, description="Depot close time in minutes from midnight (default 1020 = 5:00 PM)"),
+    num_waves: Optional[int] = Query(None, description="Max number of dispatch waves: 1 or 2 (default 2)"),
+    wave2_cutoff: Optional[int] = Query(None, description="Wave 2 latest dispatch in minutes from midnight (default 960 = 4:00 PM)"),
     special_instructions: Optional[str] = Form(
         None,
         description=(
@@ -100,10 +97,6 @@ async def optimize_routes(
             "These are merged with any 'Instructions' column in the uploaded file."
         ),
     ),
-    settings: Optional[str] = Form(
-        None,
-        description="Optional JSON string with backend settings to override defaults"
-    ),
 ):
     """
     Upload orders (CSV or XLS) and asset CSV, run route optimization,
@@ -111,48 +104,27 @@ async def optimize_routes(
 
     Dry and Cold orders at the same address are routed as separate stops.
     Oversized stops are automatically split into truck-sized loads.
-    Missing coordinates are resolved from the persistent geocode cache.
+    Latitude and Longitude must be provided in the input file.
     """
     try:
         orders_bytes = await orders_file.read()
         assets_bytes = await assets_file.read()
 
-        settings_overrides = None
-        if settings:
-            try:
-                parsed = json.loads(settings)
-                # Map frontend camelCase to backend UPPER_CASE
-                key_mapping = {
-                    'depotLat': 'DEPOT_LAT',
-                    'depotLng': 'DEPOT_LNG',
-                    'solverTimeLimit': 'SOLVER_TIME_LIMIT_SECONDS',
-                    'maxVehicleTime': 'SOLVER_MAX_VEHICLE_TIME_MINUTES',
-                    'maxWaitingTime': 'SOLVER_MAX_WAITING_MINUTES',
-                    'depotOpenMinutes': 'DEPOT_OPEN_MINUTES',
-                    'depotCloseMinutes': 'DEPOT_CLOSE_MINUTES',
-                    'defaultServiceTime': 'DEFAULT_SERVICE_TIME',
-                    'palletScale': 'PALLET_SCALE',
-                    'orsApiKey': 'ORS_API_KEY',
-                    'orsBaseUrl': 'ORS_BASE_URL',
-                    'orsMatrixBatchSize': 'ORS_MATRIX_BATCH_SIZE',
-                    'dropPenalty': 'DROP_PENALTY',
-                    'wave2ReloadBuffer': 'WAVE2_RELOAD_BUFFER_MINUTES',
-                    'wave2CutoffMinutes': 'WAVE2_CUTOFF_MINUTES',
-                    'wave2SolverTimeLimit': 'WAVE2_SOLVER_TIME_LIMIT_SECONDS',
-                }
-                settings_overrides = {key_mapping.get(k, k): v for k, v in parsed.items() if k in key_mapping}
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=422, detail="Invalid settings JSON")
-
-        orders, stops, vehicles, solver_result, constraints = await _run_optimization(
-            orders_bytes, assets_bytes, use_ors, special_instructions or "", settings_overrides
+        orders, stops, vehicles, solver_result, constraints, matrix_warnings = await _run_optimization(
+            orders_bytes, assets_bytes, use_ors, special_instructions or "",
+            depot_open=depot_open, depot_close=depot_close,
+            num_waves=num_waves, wave2_cutoff=wave2_cutoff,
         )
 
         response = build_response(orders, stops, vehicles, solver_result)
 
-        # Attach any instruction parse errors as a warning in the response
+        all_warnings = []
         if constraints.get("errors"):
-            response.status = f"success (instruction warnings: {'; '.join(constraints['errors'])})"
+            all_warnings.extend(constraints["errors"])
+        if matrix_warnings:
+            all_warnings.extend(matrix_warnings)
+        if all_warnings:
+            response.warnings = all_warnings
 
         return response
 
@@ -167,6 +139,10 @@ async def optimize_routes_csv(
     orders_file: UploadFile = File(..., description="Orders CSV or XLS file"),
     assets_file: UploadFile = File(..., description="Asset/vehicle CSV file"),
     use_ors: bool = Query(True, description="Use OpenRouteService (True) or Haversine fallback (False)"),
+    depot_open: Optional[int] = Query(None, description="Depot open time in minutes from midnight (default 480 = 8:00 AM)"),
+    depot_close: Optional[int] = Query(None, description="Depot close time in minutes from midnight (default 1020 = 5:00 PM)"),
+    num_waves: Optional[int] = Query(None, description="Max number of dispatch waves: 1 or 2 (default 2)"),
+    wave2_cutoff: Optional[int] = Query(None, description="Wave 2 latest dispatch in minutes from midnight (default 960 = 4:00 PM)"),
     special_instructions: Optional[str] = Form(
         None,
         description="Optional free-text routing directives — same format as /optimize.",
@@ -180,8 +156,10 @@ async def optimize_routes_csv(
         orders_bytes = await orders_file.read()
         assets_bytes = await assets_file.read()
 
-        orders, stops, vehicles, solver_result, _ = await _run_optimization(
-            orders_bytes, assets_bytes, use_ors, special_instructions or ""
+        orders, stops, vehicles, solver_result, _, _ = await _run_optimization(
+            orders_bytes, assets_bytes, use_ors, special_instructions or "",
+            depot_open=depot_open, depot_close=depot_close,
+            num_waves=num_waves, wave2_cutoff=wave2_cutoff,
         )
 
         csv_output = build_csv_output(orders, stops, vehicles, solver_result, orders_bytes)
@@ -196,9 +174,3 @@ async def optimize_routes_csv(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Optimization failed: {str(e)}")
-
-
-@router.get("/geocache/stats")
-async def geocache_statistics():
-    """Return the number of cached addresses and database file size."""
-    return cache_stats()

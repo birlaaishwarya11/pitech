@@ -8,4 +8,3 @@ httpx>=0.25.0
 pydantic-settings>=2.1.0
 python-dotenv>=1.0.0
 lxml
-geopy

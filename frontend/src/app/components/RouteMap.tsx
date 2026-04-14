@@ -9,6 +9,7 @@ import {
   Tooltip,
   useMap,
 } from "react-leaflet";
+import { AlertTriangle } from "lucide-react";
 
 interface OptimizationStopResult {
   seq: number;
@@ -247,8 +248,25 @@ export function RouteMap({ depot, routes }: RouteMapProps) {
     return points;
   }, [depot, visibleRoutes]);
 
+  const missingGeometry = routes.length > 0 && routes.every((r) => !r.geometry);
+
   return (
     <div className="space-y-4">
+      {missingGeometry && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+          <div className="text-sm text-amber-800">
+            <span className="font-medium">Road geometry unavailable.</span>{" "}
+            Routes are shown as straight lines because the ORS container is not
+            reachable. Run{" "}
+            <code className="rounded bg-amber-100 px-1 font-mono text-xs">
+              docker compose up -d
+            </code>{" "}
+            to start it, then re-generate routes.
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         <label
           htmlFor="route-filter"

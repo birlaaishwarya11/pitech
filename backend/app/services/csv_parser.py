@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 from io import BytesIO
 from lxml import etree
@@ -5,7 +6,11 @@ from lxml import etree
 from app.config import settings
 from app.models.schemas import OrderRecord, VehicleRecord
 from app.utils.time_utils import parse_time_to_minutes
-from app.services.geocache import geocode_address
+# Geocoding is no longer needed — the user provides Latitude/Longitude
+# directly in the input file.
+# from app.services.geocache import geocode_address
+
+logger = logging.getLogger(__name__)
 
 
 def _read_spreadsheetml(file_bytes: bytes) -> pd.DataFrame:
@@ -78,9 +83,8 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
         - inline_instructions: any routing directives found in an
           'Instructions' column in the file (empty string if none)
 
-    Coordinates missing from the file are resolved via the persistent
-    SQLite geocode cache (app/services/geocache.py).  Results are stored
-    so each address is only geocoded once across all future uploads.
+    Latitude and Longitude must be provided in the input file.
+    Rows with missing or invalid coordinates are skipped and logged.
     """
     df = _load_orders_dataframe(file_bytes)
 
@@ -98,6 +102,7 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
     inline_instructions = extract_inline_instructions(df)
 
     orders = []
+    skipped_rows = []
     for idx, row in df.iterrows():
         # NOTE: The original CSV has swapped column names —
         # "Longitude" contains lat values, "Latitude" contains lng values.
@@ -105,27 +110,45 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
         raw_lat = row.get("Longitude")
         raw_lng = row.get("Latitude")
 
+        wo = str(row.get("Work Order Number", f"row {idx}"))
+        name = str(row.get("Name", "unknown"))
+
         lat, lng = None, None
         try:
             lat = float(raw_lat)
             lng = float(raw_lng)
             if not (40.4 <= lat <= 41.0 and -74.3 <= lng <= -73.5):
+                logger.warning(
+                    "Row %s (WO %s, %s): coordinates out of bounds "
+                    "(lat=%.6f, lng=%.6f) — skipping",
+                    idx, wo, name, lat, lng,
+                )
+                skipped_rows.append(f"WO {wo} ({name}): coordinates out of bounds")
                 lat, lng = None, None
         except (TypeError, ValueError):
-            pass
+            logger.warning(
+                "Row %s (WO %s, %s): missing or non-numeric Latitude/Longitude "
+                "(raw_lat=%r, raw_lng=%r) — skipping",
+                idx, wo, name, raw_lat, raw_lng,
+            )
+            skipped_rows.append(f"WO {wo} ({name}): missing or invalid coordinates")
 
-        # Fall back to persistent geocache (SQLite → Nominatim API)
+        # Geocoding removed — coordinates must be provided in the input file.
+        # from app.services.geocache import geocode_address
+        # if lat is None or lng is None:
+        #     addr = str(row.get("Address", "")).strip()
+        #     city = str(row.get("City", "")).strip()
+        #     state = str(row.get("State", "NY")).strip()
+        #     zip_code = str(row.get("Zip", "")).strip()
+        #     coords = geocode_address(addr, city, state, zip_code)
+        #     if coords is None:
+        #         continue
+        #     lat, lng = coords
+        #     if not (40.4 <= lat <= 41.0 and -74.3 <= lng <= -73.5):
+        #         continue
+
         if lat is None or lng is None:
-            addr = str(row.get("Address", "")).strip()
-            city = str(row.get("City", "")).strip()
-            state = str(row.get("State", "NY")).strip()
-            zip_code = str(row.get("Zip", "")).strip()
-            coords = geocode_address(addr, city, state, zip_code)
-            if coords is None:
-                continue  # skip if geocoding also fails
-            lat, lng = coords
-            if not (40.4 <= lat <= 41.0 and -74.3 <= lng <= -73.5):
-                continue
+            continue
 
         # Time windows
         open_str = str(row["Open1"]).strip()
@@ -183,8 +206,21 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
             original_index=int(idx),
         ))
 
+    if skipped_rows:
+        logger.info(
+            "Skipped %d order(s) due to missing/invalid coordinates:\n  %s",
+            len(skipped_rows), "\n  ".join(skipped_rows),
+        )
+
     if not orders:
-        raise ValueError("No valid orders found after parsing and validation.")
+        detail = "No valid orders found after parsing."
+        if skipped_rows:
+            detail += (
+                f" All {len(skipped_rows)} order(s) were skipped because "
+                "Latitude/Longitude values are missing or invalid in the input file. "
+                "Please ensure every row has valid coordinates."
+            )
+        raise ValueError(detail)
 
     return orders, inline_instructions
 

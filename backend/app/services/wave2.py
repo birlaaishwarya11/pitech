@@ -26,6 +26,8 @@ def plan_second_wave(
     wave1_routes: dict,             # {original_vehicle_id: [{stop_idx, seq, arrival}]}
     duration_matrix: list[list[int]],
     stop_to_location: list[int],
+    depot_open_minutes: int | None = None,
+    wave2_cutoff_minutes: int | None = None,
 ) -> dict:
     """
     Plan wave-2 routes for stops that wave 1 could not assign.
@@ -64,7 +66,7 @@ def plan_second_wave(
             )
         else:
             # Idle in wave 1 — available immediately
-            wave2_start = settings.DEPOT_OPEN_MINUTES
+            wave2_start = depot_open_minutes if depot_open_minutes is not None else settings.DEPOT_OPEN_MINUTES
 
         vehicle_wave2_start[v_id] = wave2_start
 
@@ -73,7 +75,7 @@ def plan_second_wave(
         (
             (v_id, start_t)
             for v_id, start_t in vehicle_wave2_start.items()
-            if start_t <= settings.WAVE2_CUTOFF_MINUTES
+            if start_t <= (wave2_cutoff_minutes if wave2_cutoff_minutes is not None else settings.WAVE2_CUTOFF_MINUTES)
         ),
         key=lambda x: x[0],
     )
@@ -118,11 +120,14 @@ def plan_second_wave(
         remapped: list[dict] = []
         for s in route_stops:
             orig_stop_idx = dropped_stop_indices[s["stop_idx"]]
-            remapped.append({
+            entry = {
                 "stop_idx": orig_stop_idx,
                 "seq": s["seq"],
                 "arrival": s["arrival"],
-            })
+            }
+            if "finish_time" in s:
+                entry["finish_time"] = s["finish_time"]
+            remapped.append(entry)
             w2_assigned_local.add(s["stop_idx"])
         remapped_routes[orig_v_id] = remapped
 

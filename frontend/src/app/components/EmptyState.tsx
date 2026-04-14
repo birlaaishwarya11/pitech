@@ -1,6 +1,29 @@
-import { Upload } from "lucide-react";
+import { Upload, Loader2 } from "lucide-react";
 
-export function EmptyState() {
+interface EmptyStateProps {
+  isGenerating?: boolean;
+}
+
+export function EmptyState({ isGenerating = false }: EmptyStateProps) {
+  if (isGenerating) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-140px)]">
+        <div className="text-center max-w-md">
+          <div className="size-20 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-6">
+            <Loader2 className="size-10 text-blue-600 animate-spin" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Optimizing routes...
+          </h2>
+          <p className="text-base text-gray-600">
+            Building distance matrix, solving vehicle routing, and generating
+            road geometry. This may take a minute for large order sets.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-center h-[calc(100vh-140px)]">
       <div className="text-center max-w-md">
