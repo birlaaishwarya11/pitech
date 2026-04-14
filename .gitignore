@@ -43,3 +43,16 @@ Thumbs.db
 .env.*.local
 
 .matrix_cache/
+
+# Client data — order files, asset lists, optimized outputs
+*.csv
+pitechquestionsdatasets/
+pitechquestionsdatasets.zip
+geocache.db
+backend/geocache.db
+
+# Test artifacts
+frontend/test-results/
+
+# Other build dirs
+nextjs-integration/
