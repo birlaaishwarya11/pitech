@@ -193,42 +193,6 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          {/* OpenRouteService Configuration */}
-          <Card>
-            <CardHeader>
-              <CardTitle>OpenRouteService Configuration</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="orsApiKey">ORS API Key</Label>
-                <Input
-                  id="orsApiKey"
-                  type="password"
-                  value={settings.orsApiKey}
-                  onChange={(e) => handleInputChange("orsApiKey", e.target.value)}
-                  placeholder="Enter your OpenRouteService API key"
-                />
-              </div>
-              <div>
-                <Label htmlFor="orsBaseUrl">ORS Base URL</Label>
-                <Input
-                  id="orsBaseUrl"
-                  value={settings.orsBaseUrl}
-                  onChange={(e) => handleInputChange("orsBaseUrl", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="orsMatrixBatchSize">Matrix Batch Size</Label>
-                <Input
-                  id="orsMatrixBatchSize"
-                  type="number"
-                  value={settings.orsMatrixBatchSize}
-                  onChange={(e) => handleInputChange("orsMatrixBatchSize", parseInt(e.target.value))}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Wave 2 Configuration */}
           <Card>
             <CardHeader>
