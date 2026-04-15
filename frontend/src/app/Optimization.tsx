@@ -5,6 +5,12 @@ import { EmptyState } from "./components/EmptyState";
 import { toast } from "sonner";
 import { Toaster } from "./components/ui/sonner";
 import { RouteMap } from "./components/RouteMap";
+import { RemovedStopsPanel } from "./components/RemovedStopsPanel";
+import { EditableRouteList } from "./components/EditableRouteList";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Button } from "./components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
+import { RefreshCw } from "lucide-react";
 
 interface DepotInfo {
   name: string;
@@ -68,6 +74,12 @@ export default function Optimization() {
   const [specialInstructionsText, setSpecialInstructionsText] = useState("");
   const [optimizationResult, setOptimizationResult] =
     useState<OptimizationResponse | null>(null);
+
+  // Manual route editing state
+  const [removedStops, setRemovedStops] = useState<OptimizationStopResult[]>([]);
+  const [modifiedRoutes, setModifiedRoutes] = useState<OptimizationRouteResult[]>([]);
+  const [activeTab, setActiveTab] = useState("map");
+  const [routesToShow, setRoutesToShow] = useState<number[]>([]);
 
   // Depot & wave settings
   const [depotOpen, setDepotOpen] = useState("08:00");
@@ -215,6 +227,90 @@ export default function Optimization() {
     setOrdersCount(0);
     setTotalPallets(0);
     setOptimizationResult(null);
+    setRemovedStops([]);
+    setModifiedRoutes([]);
+  };
+
+  const handleRemoveStop = (routeNumber: number, stopSeq: number) => {
+    if (!optimizationResult) return;
+
+    const updatedRoutes = modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes;
+    const route = updatedRoutes.find((r) => r.route_number === routeNumber);
+    if (!route) return;
+
+    const stopToRemove = route.stops.find((s) => s.seq === stopSeq);
+    if (!stopToRemove) return;
+
+    setRemovedStops([...removedStops, stopToRemove]);
+
+    const newRoutes = updatedRoutes.map((r) => {
+      if (r.route_number === routeNumber) {
+        return {
+          ...r,
+          stops: r.stops.filter((s) => s.seq !== stopSeq),
+          num_stops: r.num_stops - 1,
+          total_pallets: r.total_pallets - stopToRemove.pallets,
+        };
+      }
+      return r;
+    });
+
+    setModifiedRoutes(newRoutes);
+    toast.success("Stop removed", {
+      description: `${stopToRemove.name} removed from route ${routeNumber}`,
+    });
+  };
+
+  const handleRestoreStop = (stop: OptimizationStopResult) => {
+    setRemovedStops(removedStops.filter((s) => s.seq !== stop.seq));
+    toast.success("Stop restored", {
+      description: `${stop.name} moved back to unassigned`,
+    });
+  };
+
+  const handleMoveStop = (
+    stop: OptimizationStopResult,
+    sourceRouteNumber: number,
+    targetRouteNumber: number
+  ) => {
+    if (!optimizationResult) return;
+
+    const updatedRoutes = modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes;
+
+    const newRoutes = updatedRoutes.map((route) => {
+      // Remove from source route
+      if (route.route_number === sourceRouteNumber) {
+        return {
+          ...route,
+          stops: route.stops.filter((s) => s.seq !== stop.seq),
+          num_stops: route.num_stops - 1,
+          total_pallets: route.total_pallets - stop.pallets,
+        };
+      }
+      // Add to target route
+      if (route.route_number === targetRouteNumber) {
+        return {
+          ...route,
+          stops: [...route.stops, stop],
+          num_stops: route.num_stops + 1,
+          total_pallets: route.total_pallets + stop.pallets,
+        };
+      }
+      return route;
+    });
+
+    setModifiedRoutes(newRoutes);
+    toast.success("Stop moved", {
+      description: `${stop.name} moved from route ${sourceRouteNumber} to route ${targetRouteNumber}`,
+    });
+  };
+
+  const getFilteredRoutes = () => {
+    const allRoutes = modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult?.routes || [];
+    if (Array.isArray(routesToShow)) {
+      return allRoutes.filter(route => routesToShow.includes(route.route_number));
+    }
+    return allRoutes.slice(0, routesToShow);
   };
 
   const handleOrdersFileChange = (file: File | null) => {
@@ -386,45 +482,229 @@ export default function Optimization() {
             <EmptyState isGenerating={isGenerating} />
           ) : (
             <div className="p-6 space-y-6">
-              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <div className="px-6 pt-6 pb-3">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Route map
-                  </h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Optimized routes displayed on the map using road-following
-                    geometry.
-                  </p>
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <div className="flex items-center justify-between mb-6">
+<TabsList className="grid w-full max-w-md grid-cols-3">
+                  <TabsTrigger value="map">Map</TabsTrigger>
+                  <TabsTrigger value="routes">Routes</TabsTrigger>
+                    <TabsTrigger value="edit">Edit Routes</TabsTrigger>
+                  </TabsList>
+                  
+                  {activeTab === "map" && (
+                    <Button
+                      onClick={() => {
+                        // Force re-render of map by updating a key or state
+                        setActiveTab("map");
+                        toast.success("Map refreshed");
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center gap-2"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Refresh Map
+                    </Button>
+                  )}
                 </div>
 
-                <div className="px-6 pb-6">
-                  <RouteMap
-                    depot={optimizationResult.depot}
-                    routes={optimizationResult.routes}
-                  />
-                </div>
-              </div>
+                <TabsContent value="map" className="space-y-6">
+                  <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                    <div className="px-6 pt-6 pb-3">
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Route map
+                      </h2>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Optimized routes displayed on the map. You can edit routes by removing or moving stops.
+                      </p>
+                    </div>
+
+                    <div className="px-6 pb-6">
+                      <RouteMap
+                        key={modifiedRoutes.length} // Force re-render when routes change
+                        depot={optimizationResult.depot}
+                        routes={modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes}
+                        removedStops={removedStops}
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="routes" className="space-y-6">
+                  {removedStops.length > 0 && (
+                    <div className="bg-white rounded-lg border border-gray-200 p-6">
+                      <RemovedStopsPanel
+                        removedStops={removedStops}
+                        onRestoreStop={handleRestoreStop}
+                      />
+                    </div>
+                  )}
+
+                  <div className="bg-white rounded-lg border border-gray-200 p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">
+                          Routes
+                        </h2>
+                        <p className="text-sm text-gray-600 mt-1">
+                          View all routes with capacity information. Use the Edit Routes tab for detailed editing.
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={downloadRoutePlanText}
+                        className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                      >
+                        Download Route Plan
+                      </button>
+                    </div>
+
+                    <EditableRouteList
+                      routes={modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes}
+                      onRemoveStop={handleRemoveStop}
+                      onMoveStop={handleMoveStop}
+                    />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="edit" className="space-y-6">
+                  {removedStops.length > 0 && (
+                    <div className="bg-white rounded-lg border border-gray-200 p-6">
+                      <RemovedStopsPanel
+                        removedStops={removedStops}
+                        onRestoreStop={handleRestoreStop}
+                      />
+                    </div>
+                  )}
+
+                  <div className="bg-white rounded-lg border border-gray-200 p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">
+                          Edit Routes
+                        </h2>
+                        <p className="text-sm text-gray-600 mt-1">
+                          Select exactly 2 routes to edit side by side. Drag stops between routes for easy rebalancing.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 mb-6">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Route 1:</span>
+                        <Select 
+                          value={routesToShow[0]?.toString() || ""}
+                          onValueChange={(value) => {
+                            const routeNum = parseInt(value);
+                            const newSelection = [...routesToShow];
+                            newSelection[0] = routeNum;
+                            // Remove from second position if same
+                            if (newSelection[1] === routeNum) {
+                              newSelection[1] = undefined;
+                            }
+                            setRoutesToShow(newSelection.filter(r => r !== undefined));
+                          }}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue placeholder="Select route" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult?.routes || [])
+                              .filter(route => !routesToShow.includes(route.route_number) || route.route_number === routesToShow[0])
+                              .map((route) => (
+                              <SelectItem key={route.route_number} value={route.route_number.toString()}>
+                                Route {route.route_number}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Route 2:</span>
+                        <Select 
+                          value={routesToShow[1]?.toString() || ""}
+                          onValueChange={(value) => {
+                            const routeNum = parseInt(value);
+                            const newSelection = [...routesToShow];
+                            newSelection[1] = routeNum;
+                            // Remove from first position if same
+                            if (newSelection[0] === routeNum) {
+                              newSelection[0] = undefined;
+                            }
+                            setRoutesToShow(newSelection.filter(r => r !== undefined));
+                          }}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue placeholder="Select route" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult?.routes || [])
+                              .filter(route => !routesToShow.includes(route.route_number) || route.route_number === routesToShow[1])
+                              .map((route) => (
+                              <SelectItem key={route.route_number} value={route.route_number.toString()}>
+                                Route {route.route_number}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {Array.isArray(routesToShow) && routesToShow.length === 2 ? (
+                      <div className="grid grid-cols-2 gap-6">
+                        {routesToShow.map(routeNumber => {
+                          const route = (modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult?.routes || [])
+                            .find(r => r.route_number === routeNumber);
+                          return route ? (
+                            <div key={route.route_number} className="space-y-3">
+                              <div className="flex items-center gap-2 mb-4">
+                                <h3 className="text-sm font-medium text-gray-700">
+                                  Route {route.route_number} · {route.vehicle}
+                                </h3>
+                                <span className="text-xs text-gray-600">
+                                  {route.total_pallets} / {route.vehicle_capacity_pallets} pallets
+                                </span>
+                                {(() => {
+                                  const percentage = Math.round((route.total_pallets / route.vehicle_capacity_pallets) * 100);
+                                  const isOverCapacity = route.total_pallets > route.vehicle_capacity_pallets;
+                                  const isNearCapacity = percentage >= 85 && !isOverCapacity;
+                                  
+                                  return (
+                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                      isOverCapacity 
+                                        ? 'bg-red-100 text-red-800' 
+                                        : isNearCapacity 
+                                          ? 'bg-amber-100 text-amber-800' 
+                                          : 'bg-green-100 text-green-800'
+                                    }`}>
+                                      {percentage}%
+                                    </span>
+                                  );
+                                })()}
+                              </div>
+                              
+                              <EditableRouteList
+                                routes={[route]}
+                                onRemoveStop={handleRemoveStop}
+                                onMoveStop={handleMoveStop}
+                              />
+                            </div>
+                          ) : null;
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-12 text-gray-500">
+                        <p>Please select exactly 2 routes to edit side by side.</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
 
               <div className="bg-white rounded-lg border border-gray-200 p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">
-                      Route plan ready
-                    </h2>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Optimization completed successfully. Download the route
-                      plan to review vehicle assignments, stop sequence,
-                      pallets, and estimated arrival times.
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={downloadRoutePlanText}
-                    className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                  >
-                    Download Route Plan
-                  </button>
-                </div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                  Route summary
+                </h3>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-gray-50 rounded-lg p-4">
@@ -444,32 +724,18 @@ export default function Optimization() {
                   <div className="bg-gray-50 rounded-lg p-4">
                     <p className="text-xs text-gray-500 mb-1">Routes used</p>
                     <p className="text-sm font-semibold text-gray-900">
-                      {optimizationResult.routes_used}
+                      {(modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes).length}
                     </p>
                   </div>
 
                   <div className="bg-gray-50 rounded-lg p-4">
                     <p className="text-xs text-gray-500 mb-1">
-                      Unassigned orders
+                      Removed stops
                     </p>
                     <p className="text-sm font-semibold text-gray-900">
-                      {optimizationResult.unassigned_orders}
+                      {removedStops.length}
                     </p>
                   </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg border border-gray-200 p-6">
-                <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                  What is included in the route plan
-                </h3>
-
-                <div className="space-y-2 text-sm text-gray-600">
-                  <p>• Vehicle assignment for each route</p>
-                  <p>• Stop sequence within each route</p>
-                  <p>• Estimated arrival time for each stop</p>
-                  <p>• Pallets and order types for each stop</p>
-                  <p>• Work order numbers for download and review</p>
                 </div>
               </div>
             </div>

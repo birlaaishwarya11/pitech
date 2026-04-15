@@ -51,6 +51,7 @@ interface DepotInfo {
 interface RouteMapProps {
   depot: DepotInfo;
   routes: OptimizationRouteResult[];
+  removedStops?: OptimizationStopResult[];
 }
 
 interface RouteOption {
@@ -180,7 +181,7 @@ function renderStopMarker(
   );
 }
 
-export function RouteMap({ depot, routes }: RouteMapProps) {
+export function RouteMap({ depot, routes, removedStops = [] }: RouteMapProps) {
   const [selectedRouteValue, setSelectedRouteValue] = useState<string>("all");
   const [focusedStopKey, setFocusedStopKey] = useState<string | null>(null);
 
@@ -189,10 +190,23 @@ export function RouteMap({ depot, routes }: RouteMapProps) {
   const routeOptions = useMemo<RouteOption[]>(() => {
     return [
       { value: "all", label: "All routes" },
-      ...routes.map((route) => ({
-        value: String(route.route_number),
-        label: `Route ${route.route_number} · ${route.vehicle}`,
-      })),
+      ...routes.map((route) => {
+        const capacityPercentage = Math.round((route.total_pallets / route.vehicle_capacity_pallets) * 100);
+        const isOverCapacity = route.total_pallets > route.vehicle_capacity_pallets;
+        const isNearCapacity = capacityPercentage >= 85 && !isOverCapacity;
+        
+        let capacityStatus = "";
+        if (isOverCapacity) {
+          capacityStatus = " (OVER CAPACITY)";
+        } else if (isNearCapacity) {
+          capacityStatus = " (NEAR CAPACITY)";
+        }
+        
+        return {
+          value: String(route.route_number),
+          label: `Route ${route.route_number} · ${route.vehicle} · ${route.total_pallets}/${route.vehicle_capacity_pallets} pallets (${capacityPercentage}%${capacityStatus})`,
+        };
+      }),
     ];
   }, [routes]);
 
@@ -296,9 +310,31 @@ export function RouteMap({ depot, routes }: RouteMapProps) {
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="mb-3">
             <h3 className="text-sm font-semibold text-gray-900">
-              Stops for Route {selectedSingleRoute.route_number}
+              Route {selectedSingleRoute.route_number} · {selectedSingleRoute.vehicle}
             </h3>
-            <p className="text-sm text-gray-600">
+            <div className="mt-2 flex items-center gap-4">
+              <div className="text-sm text-gray-600">
+                Capacity: {selectedSingleRoute.total_pallets} / {selectedSingleRoute.vehicle_capacity_pallets} pallets
+              </div>
+              {(() => {
+                const percentage = Math.round((selectedSingleRoute.total_pallets / selectedSingleRoute.vehicle_capacity_pallets) * 100);
+                const isOverCapacity = selectedSingleRoute.total_pallets > selectedSingleRoute.vehicle_capacity_pallets;
+                const isNearCapacity = percentage >= 85 && !isOverCapacity;
+                
+                return (
+                  <span className={`px-2 py-1 rounded text-sm font-medium ${
+                    isOverCapacity 
+                      ? 'bg-red-100 text-red-800' 
+                      : isNearCapacity 
+                        ? 'bg-amber-100 text-amber-800' 
+                        : 'bg-green-100 text-green-800'
+                  }`}>
+                    {percentage}% capacity
+                  </span>
+                );
+              })()}
+            </div>
+            <p className="text-sm text-gray-600 mt-1">
               Click a stop to jump to it on the map.
             </p>
           </div>
@@ -377,6 +413,45 @@ export function RouteMap({ depot, routes }: RouteMapProps) {
               </div>
             </Popup>
           </CircleMarker>
+
+          {removedStops.map((stop) => (
+            <CircleMarker
+              key={`removed-${stop.seq}`}
+              center={[stop.latitude, stop.longitude]}
+              radius={7}
+              pathOptions={{
+                color: "#9ca3af",
+                fillColor: "#f3f4f6",
+                fillOpacity: 0.8,
+                weight: 2,
+                dashArray: "4, 4",
+              }}
+            >
+              <Tooltip direction="top">
+                <div className="text-xs">
+                  <div className="font-medium">{stop.name}</div>
+                  <div className="text-gray-600">Removed</div>
+                </div>
+              </Tooltip>
+              <Popup>
+                <div className="text-sm">
+                  <div className="font-semibold text-amber-700 mb-1">
+                    ⚠ Removed Stop
+                  </div>
+                  <div className="font-medium">{stop.name}</div>
+                  <div className="text-gray-600">
+                    {stop.address}, {stop.city}, {stop.state}
+                  </div>
+                  <div className="mt-2 pt-2 border-t text-xs">
+                    <div>Pallets: {stop.pallets}</div>
+                    <div>
+                      Order types: {stop.order_types?.join(", ") || "N/A"}
+                    </div>
+                  </div>
+                </div>
+              </Popup>
+            </CircleMarker>
+          ))}
 
           {visibleRoutes.map((route, routeIndex) => {
             const color = routeColors[routeIndex % routeColors.length];
