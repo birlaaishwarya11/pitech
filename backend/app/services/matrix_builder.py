@@ -120,7 +120,7 @@ def build_matrix_ors(
         return distances, durations
 
     client = openrouteservice.Client(
-        key=None,
+        key=settings.ORS_API_KEY or None,
         base_url=settings.ORS_BASE_URL,
     )
     n = len(unique_locations)

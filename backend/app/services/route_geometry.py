@@ -30,7 +30,7 @@ def build_route_geometry(
 
     try:
         client = openrouteservice.Client(
-            key=None,
+            key=settings.ORS_API_KEY or None,
             base_url=settings.ORS_BASE_URL,
         )
 

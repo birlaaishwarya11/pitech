@@ -6,11 +6,11 @@ class Settings(BaseSettings):
     DEPOT_LAT: float = 40.8094
     DEPOT_LNG: float = -73.8796
 
-    # OpenRouteService (self-hosted via docker-compose)
-    # The Python openrouteservice client appends /v2 automatically.
-    # Self-hosted ORS v8 exposes the API at /ors/v2 on container port 8082,
-    # mapped to host port 8080 via docker-compose.
+    # OpenRouteService
+    # Self-hosted (docker-compose): ORS_BASE_URL=http://localhost:8080/ors, no key needed
+    # Public API fallback: ORS_BASE_URL=https://api.openrouteservice.org, key required
     ORS_BASE_URL: str = "http://localhost:8080/ors"
+    ORS_API_KEY: str = ""
 
     # Solver — Wave 1
     SOLVER_TIME_LIMIT_SECONDS: int = 180

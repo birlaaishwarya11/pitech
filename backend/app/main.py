@@ -30,9 +30,13 @@ async def health_check():
 
     ors_reachable = False
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            r = await client.get(f"{settings.ORS_BASE_URL}/v2/health")
-            ors_reachable = r.status_code == 200
+        async with httpx.AsyncClient(timeout=3) as hc:
+            if "localhost" in settings.ORS_BASE_URL:
+                r = await hc.get(f"{settings.ORS_BASE_URL}/v2/health")
+                ors_reachable = r.status_code == 200
+            else:
+                # Public API — reachable if key is set
+                ors_reachable = bool(settings.ORS_API_KEY)
     except Exception:
         pass
 
