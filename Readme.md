@@ -140,11 +140,53 @@ http://localhost:5173
 
 ---
 
-## Quick Start (all three services)
+## Quick Start (copy-paste)
+
+Run these from the project root after cloning:
+
+```bash
+# 1. Backend
+cd backend
+python3 -m venv ../venv
+source ../venv/bin/activate
+pip install -r requirements.txt
+echo 'ORS_BASE_URL=http://localhost:8080/ors' > .env
+echo 'ORS_API_KEY=' >> .env
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
+cd ..
+
+# 2. Frontend
+cd frontend
+echo 'VITE_API_BASE_URL=http://localhost:8000' > .env.local
+npm install
+npm run dev &
+cd ..
+
+# 3. ORS (Docker) — road-accurate routing
+./scripts/setup-ors.sh
+# First run downloads NY OSM data (~300 MB) and builds graph (~3-5 min)
+# Subsequent starts are instant
+```
+
+Open http://localhost:5173 in your browser.
+
+### Without Docker (public ORS API fallback)
+
+If Docker is unavailable, use the public ORS API (free tier — has quota limits):
+
+```bash
+# In backend/.env:
+ORS_BASE_URL=https://api.openrouteservice.org
+ORS_API_KEY=your_key_here
+```
+
+Get a free key at [openrouteservice.org/dev/#/signup](https://openrouteservice.org/dev/#/signup).
+
+### Multi-terminal setup (alternative)
 
 You need **three terminals** (or use `docker compose` for ORS and run the rest):
 
-### Terminal 1 — ORS
+#### Terminal 1 — ORS
 
 ```bash
 docker compose up -d ors
@@ -152,26 +194,22 @@ docker compose up -d ors
 docker compose logs -f ors        # look for "ready"
 ```
 
-### Terminal 2 — Backend
+#### Terminal 2 — Backend
 
 ```bash
 cd backend
-source .venv/bin/activate
-python -m uvicorn app.main:app --reload --port 8000
+source ../venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Terminal 3 — Frontend
+#### Terminal 3 — Frontend
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-### Then open in browser
-
-```text
-http://localhost:5173
-```
+Then open http://localhost:5173
 
 ---
 
