@@ -8,7 +8,7 @@ from app.services.csv_parser import parse_orders_csv, parse_assets_csv
 from app.services.grouper import group_orders_into_stops
 from app.services.matrix_builder import build_unique_locations_from_stops, build_matrix
 from app.services.solver import solve_vrp
-from app.services.result_builder import build_response, build_csv_output
+from app.services.result_builder import build_response, build_csv_output, build_xlsx_output
 from app.services.instructions_parser import parse_instructions
 from app.services.wave2 import plan_second_wave, merge_waves
 
@@ -168,6 +168,48 @@ async def optimize_routes_csv(
             io.BytesIO(csv_output.encode("utf-8")),
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=optimized_routes.csv"},
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Optimization failed: {str(e)}")
+
+
+@router.post("/optimize/xlsx")
+async def optimize_routes_xlsx(
+    orders_file: UploadFile = File(..., description="Orders CSV or XLS file"),
+    assets_file: UploadFile = File(..., description="Asset/vehicle CSV file"),
+    use_ors: bool = Query(True, description="Use OpenRouteService (True) or Haversine fallback (False)"),
+    depot_open: Optional[int] = Query(None, description="Depot open time in minutes from midnight (default 480 = 8:00 AM)"),
+    depot_close: Optional[int] = Query(None, description="Depot close time in minutes from midnight (default 1020 = 5:00 PM)"),
+    num_waves: Optional[int] = Query(None, description="Max number of dispatch waves: 1 or 2 (default 2)"),
+    wave2_cutoff: Optional[int] = Query(None, description="Wave 2 latest dispatch in minutes from midnight (default 960 = 4:00 PM)"),
+    special_instructions: Optional[str] = Form(
+        None,
+        description="Optional free-text routing directives — same format as /optimize.",
+    ),
+):
+    """
+    Upload orders (CSV or XLS) and asset CSV, run route optimization,
+    return a downloadable Excel (.xlsx) with new Rt, Seq, Vehicle, and Arrival columns.
+    """
+    try:
+        orders_bytes = await orders_file.read()
+        assets_bytes = await assets_file.read()
+
+        orders, stops, vehicles, solver_result, _, _ = await _run_optimization(
+            orders_bytes, assets_bytes, use_ors, special_instructions or "",
+            depot_open=depot_open, depot_close=depot_close,
+            num_waves=num_waves, wave2_cutoff=wave2_cutoff,
+        )
+
+        xlsx_bytes = build_xlsx_output(orders, stops, vehicles, solver_result, orders_bytes)
+
+        return StreamingResponse(
+            io.BytesIO(xlsx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=optimized_routes.xlsx"},
         )
 
     except ValueError as e:

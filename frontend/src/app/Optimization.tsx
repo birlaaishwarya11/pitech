@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import * as XLSX from "xlsx";
 import { TopBar } from "./components/TopBar";
 import { UploadOrders } from "./components/UploadOrders";
 import { EmptyState } from "./components/EmptyState";
@@ -142,85 +143,68 @@ export default function Optimization() {
     return address.replace(/^Address\s+/i, "").trim();
   };
 
-  const downloadRoutePlanText = () => {
+  const downloadRoutePlanXlsx = () => {
     if (!optimizationResult) {
       toast.error("No optimization result to download");
       return;
     }
 
-    const lines: string[] = [];
+    // Use modifiedRoutes (edited state) if available, otherwise original
+    const routes =
+      modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes;
 
-    lines.push("Delivery Route Plan");
-    lines.push("==================");
-    lines.push(`Status: ${optimizationResult.status}`);
-    lines.push(`Solver status: ${optimizationResult.solver_status}`);
-    lines.push(`Total orders: ${optimizationResult.total_orders}`);
-    lines.push(`Total stops: ${optimizationResult.total_stops}`);
-    lines.push(`Routes used: ${optimizationResult.routes_used}`);
-    lines.push(`Vehicles available: ${optimizationResult.vehicles_available}`);
-    lines.push(`Unassigned orders: ${optimizationResult.unassigned_orders}`);
-    lines.push("");
+    // Build flat rows — one per stop, reflecting all frontend edits
+    const rows: Record<string, string | number>[] = [];
 
-    optimizationResult.routes.forEach((route, routeIndex) => {
-      lines.push(`Route ${route.route_number} / Vehicle ${route.vehicle}`);
-      lines.push("----------------------------------------");
-      lines.push(`Vehicle capacity: ${route.vehicle_capacity_pallets}`);
-      lines.push(`Total pallets: ${route.total_pallets}`);
-      lines.push(`Number of stops: ${route.num_stops}`);
-      lines.push("");
-
-      route.stops.forEach((stop) => {
-        lines.push(`${stop.seq}. ${stop.name}`);
-        lines.push(
-          `   Address: ${cleanAddress(stop.address)}, ${stop.city}, ${stop.state} ${cleanZip(stop.zip_code)}`
-        );
-        lines.push(
-          `   Arrival: ${formatMinutesToTime(stop.arrival_time_minutes)}`
-        );
-        lines.push(`   Pallets: ${stop.pallets}`);
-        lines.push(
-          `   Order types: ${
-            stop.order_types?.length ? stop.order_types.join(", ") : "N/A"
-          }`
-        );
-        lines.push(
-          `   Work orders: ${
-            stop.work_order_numbers?.length
-              ? stop.work_order_numbers.join(", ")
-              : "N/A"
-          }`
-        );
-        lines.push("");
-      });
-
-      if (routeIndex < optimizationResult.routes.length - 1) {
-        lines.push("");
+    for (const route of routes) {
+      for (const stop of route.stops) {
+        rows.push({
+          "Rt": route.route_number,
+          "Seq": stop.seq,
+          "Assigned Vehicle": route.vehicle,
+          "Work Order Numbers": stop.work_order_numbers.join(", "),
+          "Customer Number": stop.customer_number,
+          "Name": stop.name,
+          "Address": stop.address,
+          "City": stop.city,
+          "State": stop.state,
+          "Zip": stop.zip_code,
+          "Est. Arrival": formatMinutesToTime(stop.arrival_time_minutes),
+          "Pallets": stop.pallets,
+          "Order Types": stop.order_types?.join(", ") ?? "",
+          "Latitude": stop.latitude,
+          "Longitude": stop.longitude,
+        });
       }
-    });
+    }
 
-    if (optimizationResult.unassigned?.length) {
-      lines.push("");
-      lines.push("Unassigned Orders");
-      lines.push("-----------------");
-      optimizationResult.unassigned.forEach((item, idx) => {
-        lines.push(`${idx + 1}. ${JSON.stringify(item)}`);
+    // Add removed stops as UNASSIGNED
+    for (const stop of removedStops) {
+      rows.push({
+        "Rt": "REMOVED",
+        "Seq": 0,
+        "Assigned Vehicle": "",
+        "Work Order Numbers": stop.work_order_numbers.join(", "),
+        "Customer Number": stop.customer_number,
+        "Name": stop.name,
+        "Address": stop.address,
+        "City": stop.city,
+        "State": stop.state,
+        "Zip": stop.zip_code,
+        "Est. Arrival": "",
+        "Pallets": stop.pallets,
+        "Order Types": stop.order_types?.join(", ") ?? "",
+        "Latitude": stop.latitude,
+        "Longitude": stop.longitude,
       });
     }
 
-    const content = lines.join("\n");
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Optimized Routes");
+    XLSX.writeFile(wb, "optimized_routes.xlsx");
 
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "route_plan.txt";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    URL.revokeObjectURL(url);
-
-    toast.success("Route plan downloaded");
+    toast.success("Route plan downloaded as Excel");
   };
 
   const resetOptimizationView = () => {
@@ -551,7 +535,7 @@ export default function Optimization() {
                       </div>
 
                       <button
-                        onClick={downloadRoutePlanText}
+                        onClick={downloadRoutePlanXlsx}
                         className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                       >
                         Download Route Plan

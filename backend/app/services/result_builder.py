@@ -346,3 +346,23 @@ def build_csv_output(
     df["Split Loads"] = new_split
 
     return df.to_csv(index=False)
+
+
+def build_xlsx_output(
+    orders: list[OrderRecord],
+    stops: list[GroupedStop],
+    vehicles: list[VehicleRecord],
+    solver_result: dict,
+    original_csv_bytes: bytes,
+) -> bytes:
+    """
+    Build the same optimized route plan as build_csv_output but return
+    it as an Excel (.xlsx) file in bytes.
+    """
+    csv_str = build_csv_output(orders, stops, vehicles, solver_result, original_csv_bytes)
+    df = pd.read_csv(io.StringIO(csv_str))
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Optimized Routes")
+    return buf.getvalue()
