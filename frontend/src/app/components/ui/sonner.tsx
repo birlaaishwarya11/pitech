@@ -17,6 +17,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-border": "var(--border)",
         } as React.CSSProperties
       }
+      toastOptions={{
+        classNames: {
+          error: "!bg-red-50 !border-red-200 !text-red-900",
+          description: "!text-current !opacity-80",
+        },
+      }}
       {...props}
     />
   );

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, Package, Clock, Layers } from "lucide-react";
+import { FileText, Package, Clock, Layers, TruckIcon } from "lucide-react";
 import { SpecialInstructionsBuilder } from "./SpecialInstructionsBuilder";
 
 interface UploadOrdersProps {
@@ -20,6 +20,9 @@ interface UploadOrdersProps {
   onDepotCloseChange: (value: string) => void;
   onNumWavesChange: (value: number) => void;
   onWave2CutoffChange: (value: string) => void;
+  vehicleNames: string[];
+  avoidedVehicles: string[];
+  onAvoidedVehiclesChange: (vehicles: string[]) => void;
 }
 
 export function UploadOrders({
@@ -40,6 +43,9 @@ export function UploadOrders({
   onDepotCloseChange,
   onNumWavesChange,
   onWave2CutoffChange,
+  vehicleNames,
+  avoidedVehicles,
+  onAvoidedVehiclesChange,
 }: UploadOrdersProps) {
   const [instructionMode, setInstructionMode] = useState<"structured" | "raw">(
     "structured"
@@ -170,6 +176,58 @@ export function UploadOrders({
           )}
         </div>
       </div>
+
+      {/* Avoid Vehicles */}
+      {vehicleNames.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 p-5">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <TruckIcon className="size-4 text-gray-500" />
+            Avoid vehicles
+            {avoidedVehicles.length > 0 && (
+              <span className="ml-auto text-xs bg-red-100 text-red-700 rounded-full px-1.5 py-0.5 font-medium">
+                {avoidedVehicles.length}
+              </span>
+            )}
+          </h3>
+          <p className="text-xs text-gray-500 mb-3">
+            Unchecked vehicles will be excluded from route assignments.
+          </p>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {vehicleNames.map((name) => {
+              const isAvoided = avoidedVehicles.includes(name);
+              return (
+                <label
+                  key={name}
+                  className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm cursor-pointer transition-colors ${
+                    isAvoided
+                      ? "bg-red-50 text-red-700"
+                      : "hover:bg-gray-50 text-gray-900"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!isAvoided}
+                    disabled={isOptimizing}
+                    onChange={() => {
+                      if (isAvoided) {
+                        onAvoidedVehiclesChange(
+                          avoidedVehicles.filter((v) => v !== name)
+                        );
+                      } else {
+                        onAvoidedVehiclesChange([...avoidedVehicles, name]);
+                      }
+                    }}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className={isAvoided ? "line-through" : ""}>
+                    {name}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Special Instructions */}
       <div className="bg-white rounded-lg border border-gray-200 p-5">
