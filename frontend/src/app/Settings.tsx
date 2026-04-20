@@ -13,8 +13,6 @@ interface BackendSettings {
   solverTimeLimit: number;
   maxVehicleTime: number;
   maxWaitingTime: number;
-  depotOpenMinutes: number;
-  depotCloseMinutes: number;
   defaultServiceTime: number;
   palletScale: number;
   orsApiKey: string;
@@ -32,8 +30,6 @@ const defaultSettings: BackendSettings = {
   solverTimeLimit: 180,
   maxVehicleTime: 600,
   maxWaitingTime: 300,
-  depotOpenMinutes: 480,
-  depotCloseMinutes: 1020,
   defaultServiceTime: 30,
   palletScale: 100,
   orsApiKey: "",
@@ -76,11 +72,6 @@ export default function Settings() {
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
   };
 
-  const parseTime = (timeStr: string) => {
-    const [hours, mins] = timeStr.split(':').map(Number);
-    return hours * 60 + mins;
-  };
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white border-b border-gray-200">
@@ -117,29 +108,37 @@ export default function Settings() {
           {/* Depot Configuration */}
           <Card>
             <CardHeader>
-              <CardTitle>Depot Configuration</CardTitle>
+              <CardTitle>Depot Starting Point</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <p className="text-sm text-gray-500">
+                The depot is the origin and return point for all routes. All vehicles depart from and return to this location.
+              </p>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="depotOpen">Depot Open Time</Label>
+                  <Label htmlFor="depotLat">Latitude</Label>
                   <Input
-                    id="depotOpen"
-                    type="time"
-                    value={formatTime(settings.depotOpenMinutes)}
-                    onChange={(e) => handleInputChange("depotOpenMinutes", parseTime(e.target.value))}
+                    id="depotLat"
+                    type="number"
+                    step="0.0001"
+                    value={settings.depotLat}
+                    onChange={(e) => handleInputChange("depotLat", parseFloat(e.target.value))}
                   />
                 </div>
                 <div>
-                  <Label htmlFor="depotClose">Depot Close Time</Label>
+                  <Label htmlFor="depotLng">Longitude</Label>
                   <Input
-                    id="depotClose"
-                    type="time"
-                    value={formatTime(settings.depotCloseMinutes)}
-                    onChange={(e) => handleInputChange("depotCloseMinutes", parseTime(e.target.value))}
+                    id="depotLng"
+                    type="number"
+                    step="0.0001"
+                    value={settings.depotLng}
+                    onChange={(e) => handleInputChange("depotLng", parseFloat(e.target.value))}
                   />
                 </div>
               </div>
+              <p className="text-xs text-gray-400">
+                Default: Hunts Point, Bronx (40.8094, -73.8796)
+              </p>
             </CardContent>
           </Card>
 
