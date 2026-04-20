@@ -225,24 +225,169 @@ Then open http://localhost:5173
 
 ---
 
+## Architecture
+
+```
+                         ┌─────────────────────────────────────┐
+                         │           Frontend (React)          │
+                         │        http://localhost:5173         │
+                         │  Upload CSV → View Map → Download   │
+                         └──────────────┬──────────────────────┘
+                                        │ POST /api/v1/optimize
+                                        ▼
+┌───────────────────────────────────────────────────────────────────┐
+│                      Backend (FastAPI)                             │
+│                    http://localhost:8000                           │
+│                                                                   │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌───────────────┐  │
+│  │  CSV     │──▶│ Grouper  │──▶│ ORS      │──▶│  OR-Tools     │  │
+│  │  Parser  │   │ (stops)  │   │ Matrix   │   │  CVRPTW       │  │
+│  └──────────┘   └──────────┘   └──────────┘   │  Solver       │  │
+│       │                             │          └───────┬───────┘  │
+│       │                             │                  │          │
+│       ▼                             ▼                  ▼          │
+│  Validate cols,            Distance/duration     Optimized routes │
+│  coords, loads             matrix (real roads)   with assignments │
+│                                                        │          │
+│                         ┌──────────────┐               │          │
+│                         │ ORS Geometry │◀──────────────┘          │
+│                         │ (per route)  │                          │
+│                         └──────┬───────┘                          │
+│                                │                                  │
+│                                ▼                                  │
+│                     Road-following polylines                      │
+│                     + distance per route                          │
+└───────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+                         ┌──────────────────────────┐
+                         │  OpenRouteService (ORS)   │
+                         │  http://localhost:8080     │
+                         │  Docker · driving-hgv     │
+                         │  NY state OSM data        │
+                         └──────────────────────────┘
+```
+
+**Data flow:** CSV upload → parse & validate → group orders into stops → build distance/duration matrix via ORS → solve CVRPTW with OR-Tools → build road geometry per route → return JSON to frontend → render on Leaflet map
+
+---
+
 ## Backend API
 
-The frontend calls:
+Interactive Swagger docs are available at **http://localhost:8000/docs** when the backend is running.
+
+### `GET /api/v1/health`
+
+Health check. Returns ORS reachability status.
+
+```json
+{ "status": "healthy", "service": "piTech Route Optimizer", "ors_reachable": true }
+```
+
+### `POST /api/v1/optimize`
+
+Main optimization endpoint. Returns JSON with optimized routes.
+
+| Parameter              | Type   | In    | Required | Description |
+| ---------------------- | ------ | ----- | -------- | ----------- |
+| `orders_file`          | file   | body  | yes      | Orders CSV or XLS |
+| `assets_file`          | file   | body  | yes      | Vehicle/asset CSV |
+| `special_instructions` | string | body  | no       | Routing directives (skip, lock, priority, window, note) |
+| `use_ors`              | bool   | query | no       | Use ORS for real road distances (default: true) |
+| `depot_open`           | int    | query | no       | Depot open time in minutes from midnight (default: 480 = 8 AM) |
+| `depot_close`          | int    | query | no       | Depot close time (default: 1020 = 5 PM) |
+| `num_waves`            | int    | query | no       | Max dispatch waves: 1 or 2 (default: 2) |
+| `wave2_cutoff`         | int    | query | no       | Wave 2 latest dispatch in minutes (default: 960 = 4 PM) |
+
+**Response:** `OptimizationResponse` with routes, stops, geometry, distances, finish times, unassigned orders, and warnings.
+
+### `POST /api/v1/optimize/csv`
+
+Same as `/optimize` but returns a downloadable CSV file.
+
+### `POST /api/v1/optimize/xlsx`
+
+Same as `/optimize` but returns a downloadable Excel (.xlsx) file.
+
+### Special instructions format
 
 ```
-POST /api/v1/optimize
+skip: WO#977187
+lock: Salt & Sea Mission → truck=FB-1
+priority: MUNA Social Service
+window: WO#976054 → 08:30-10:00
+note: WO#976055 → call 30min ahead
 ```
 
-| Parameter              | Type   | Required |
-| ---------------------- | ------ | -------- |
-| `orders_file`          | file   | yes      |
-| `assets_file`          | file   | yes      |
-| `special_instructions` | string | no       |
-| `use_ors`              | query  | no       |
-| `depot_open`           | query  | no       |
-| `depot_close`          | query  | no       |
-| `num_waves`            | query  | no       |
-| `wave2_cutoff`         | query  | no       |
+### Error responses
+
+| Status | When |
+| ------ | ---- |
+| 422    | Empty file, missing columns, no valid coordinates, no vehicles |
+| 500    | Solver failure, ORS unreachable (with Haversine fallback warning) |
+
+---
+
+## Deployment Guide
+
+### Local development
+
+See [Quick Start](#quick-start-copy-paste) above.
+
+### Production deployment
+
+#### Backend (any Linux server or cloud VM)
+
+```bash
+# Install Python 3.10+, clone repo
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Create .env with production settings
+cat > .env << EOF
+ORS_BASE_URL=http://localhost:8080/ors
+ORS_API_KEY=
+CORS_ORIGINS=https://your-frontend-domain.com
+EOF
+
+# Run with gunicorn for production
+pip install gunicorn
+gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
+```
+
+#### Frontend (static hosting — Vercel, Netlify, S3, etc.)
+
+```bash
+cd frontend
+
+# Set the production API URL
+echo 'VITE_API_BASE_URL=https://your-backend-domain.com' > .env.production
+
+# Build static files
+npm install && npm run build
+
+# Deploy the dist/ folder to your hosting provider
+```
+
+#### ORS (Docker on the server)
+
+```bash
+# On the production server
+./scripts/setup-ors.sh
+# First run: ~5 min to build graph. After that, starts in seconds.
+```
+
+#### Environment variables reference
+
+| Variable | Where | Default | Description |
+| -------- | ----- | ------- | ----------- |
+| `ORS_BASE_URL` | backend `.env` | `http://localhost:8080/ors` | ORS server URL |
+| `ORS_API_KEY` | backend `.env` | (empty) | Only needed for public ORS API |
+| `CORS_ORIGINS` | backend `.env` | `http://localhost:5173,...` | Comma-separated allowed origins |
+| `DEPOT_LAT` | backend `.env` | `40.8094` | Depot latitude (Hunts Point) |
+| `DEPOT_LNG` | backend `.env` | `-73.8796` | Depot longitude |
+| `VITE_API_BASE_URL` | frontend `.env.local` | — | Backend API URL |
 
 ---
 
@@ -265,3 +410,6 @@ docker compose down
 | Backend can't reach ORS | Ensure ORS container is running and healthy on port 8080 |
 | Frontend shows network error | Confirm backend is running on port 8000 and `.env` has the correct URL |
 | Routes use straight-line distances | ORS is not running or not healthy — start it with `docker compose up -d ors` |
+| CORS error in browser | Add your frontend URL to `CORS_ORIGINS` in `backend/.env` |
+| Empty file error | Ensure the CSV is not empty and has the required columns |
+| All orders skipped | Verify Latitude/Longitude columns have valid NYC-area coordinates |

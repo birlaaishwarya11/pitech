@@ -6,9 +6,6 @@ from lxml import etree
 from app.config import settings
 from app.models.schemas import OrderRecord, VehicleRecord
 from app.utils.time_utils import parse_time_to_minutes
-# Geocoding is no longer needed — the user provides Latitude/Longitude
-# directly in the input file.
-# from app.services.geocache import geocode_address
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +32,8 @@ def _read_spreadsheetml(file_bytes: bytes) -> pd.DataFrame:
 
 def _load_orders_dataframe(file_bytes: bytes) -> pd.DataFrame:
     """Load orders from CSV or SpreadsheetML XLS bytes into a DataFrame."""
+    if not file_bytes or not file_bytes.strip():
+        raise ValueError("Uploaded file is empty. Please select a valid CSV or XLS file.")
     sniff = file_bytes[:200].lstrip()
     if sniff.startswith(b'<?xml') or sniff.startswith(b'<Workbook'):
         return _read_spreadsheetml(file_bytes)
@@ -132,20 +131,6 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
                 idx, wo, name, raw_lat, raw_lng,
             )
             skipped_rows.append(f"WO {wo} ({name}): missing or invalid coordinates")
-
-        # Geocoding removed — coordinates must be provided in the input file.
-        # from app.services.geocache import geocode_address
-        # if lat is None or lng is None:
-        #     addr = str(row.get("Address", "")).strip()
-        #     city = str(row.get("City", "")).strip()
-        #     state = str(row.get("State", "NY")).strip()
-        #     zip_code = str(row.get("Zip", "")).strip()
-        #     coords = geocode_address(addr, city, state, zip_code)
-        #     if coords is None:
-        #         continue
-        #     lat, lng = coords
-        #     if not (40.4 <= lat <= 41.0 and -74.3 <= lng <= -73.5):
-        #         continue
 
         if lat is None or lng is None:
             continue

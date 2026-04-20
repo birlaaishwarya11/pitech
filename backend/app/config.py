@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     ORS_BASE_URL: str = "http://localhost:8080/ors"
     ORS_API_KEY: str = ""
 
+    # CORS — comma-separated origins, or "*" for allow-all (dev only)
+    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+
     # Solver — Wave 1
     SOLVER_TIME_LIMIT_SECONDS: int = 180
     SOLVER_MAX_VEHICLE_TIME_MINUTES: int = 600  # 10 hours
