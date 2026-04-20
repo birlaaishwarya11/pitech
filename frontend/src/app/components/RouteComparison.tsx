@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 
 interface ParsedFile {
   fileName: string;
@@ -9,6 +9,8 @@ interface ParsedFile {
   vehicles: string[];
   workOrders: Set<string>;
   totalDistanceKm: number | null;
+  distanceLoading: boolean;
+  rawFile?: File;
 }
 
 interface ComparisonResult {
@@ -19,36 +21,14 @@ interface ComparisonResult {
   commonOrders: number;
 }
 
-// Haversine distance in km between two lat/lng points
-function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// Depot location (Hunts Point, Bronx)
-const DEPOT_LAT = 40.8094;
-const DEPOT_LNG = -73.8796;
-const ROAD_FACTOR = 1.4; // straight-line to road distance multiplier
-
-function parseCSV(text: string, fileName: string): ParsedFile | null {
+function parseCSVText(text: string, fileName: string): Omit<ParsedFile, "distanceLoading" | "rawFile"> | null {
   const lines = text.trim().split("\n");
   if (lines.length < 2) return null;
 
   const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
   const woIdx = headers.findIndex((h) => h === "Work Order Number");
   const rtIdx = headers.findIndex((h) => h === "Rt");
-  const seqIdx = headers.findIndex((h) => h === "Seq");
   const vehicleIdx = headers.findIndex((h) => h === "Assigned Vehicle");
-  // CSV may have swapped columns — check both
-  const latIdx = headers.findIndex((h) => h === "Latitude");
-  const lngIdx = headers.findIndex((h) => h === "Longitude");
 
   if (woIdx === -1) return null;
 
@@ -56,53 +36,14 @@ function parseCSV(text: string, fileName: string): ParsedFile | null {
   const vehicles = new Set<string>();
   const routeIds = new Set<string>();
 
-  // Collect stops per route for distance calculation
-  const routeStops: Map<string, { seq: number; lat: number; lng: number }[]> = new Map();
-
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
     const wo = cols[woIdx];
     if (wo) workOrders.add(wo);
 
     const rt = rtIdx !== -1 ? cols[rtIdx] : "";
-    if (rt && rt !== "UNASSIGNED" && rt !== "REMOVED") {
-      routeIds.add(rt);
-    }
-    if (vehicleIdx !== -1 && cols[vehicleIdx]) {
-      vehicles.add(cols[vehicleIdx]);
-    }
-
-    // Collect coordinates for distance estimation
-    if (rt && rt !== "UNASSIGNED" && rt !== "REMOVED" && latIdx !== -1 && lngIdx !== -1) {
-      const lat = parseFloat(cols[latIdx]);
-      const lng = parseFloat(cols[lngIdx]);
-      // Handle the swapped columns: if "Latitude" has lng-like values, swap
-      const seq = seqIdx !== -1 ? parseInt(cols[seqIdx]) || 0 : i;
-      if (!isNaN(lat) && !isNaN(lng)) {
-        if (!routeStops.has(rt)) routeStops.set(rt, []);
-        routeStops.get(rt)!.push({ seq, lat, lng });
-      }
-    }
-  }
-
-  // Estimate total distance: depot → stops in sequence → depot per route
-  let totalDistanceKm: number | null = null;
-  if (routeStops.size > 0) {
-    let total = 0;
-    for (const [, stops] of routeStops) {
-      stops.sort((a, b) => a.seq - b.seq);
-      // Depot to first stop
-      let prevLat = DEPOT_LAT;
-      let prevLng = DEPOT_LNG;
-      for (const stop of stops) {
-        total += haversineKm(prevLat, prevLng, stop.lat, stop.lng);
-        prevLat = stop.lat;
-        prevLng = stop.lng;
-      }
-      // Last stop back to depot
-      total += haversineKm(prevLat, prevLng, DEPOT_LAT, DEPOT_LNG);
-    }
-    totalDistanceKm = Math.round(total * ROAD_FACTOR * 10) / 10;
+    if (rt && rt !== "UNASSIGNED" && rt !== "REMOVED") routeIds.add(rt);
+    if (vehicleIdx !== -1 && cols[vehicleIdx]) vehicles.add(cols[vehicleIdx]);
   }
 
   return {
@@ -111,7 +52,7 @@ function parseCSV(text: string, fileName: string): ParsedFile | null {
     totalOrders: workOrders.size,
     vehicles: Array.from(vehicles),
     workOrders,
-    totalDistanceKm,
+    totalDistanceKm: null,
   };
 }
 
@@ -119,13 +60,11 @@ function compare(a: ParsedFile, b: ParsedFile): ComparisonResult {
   const addedOrders = [...b.workOrders].filter((wo) => !a.workOrders.has(wo));
   const removedOrders = [...a.workOrders].filter((wo) => !b.workOrders.has(wo));
   const commonOrders = [...a.workOrders].filter((wo) => b.workOrders.has(wo)).length;
-
   return { fileA: a, fileB: b, addedOrders, removedOrders, commonOrders };
 }
 
 function DiffBadge({ value, suffix = "", invert = false }: { value: number; suffix?: string; invert?: boolean }) {
   if (value === 0) return <span className="text-gray-500 text-xs">no change</span>;
-  // invert: for distance/routes, negative = good (green), positive = bad (red)
   const isGood = invert ? value < 0 : value > 0;
   const color = isGood ? "text-green-600" : "text-red-600";
   const sign = value > 0 ? "+" : "";
@@ -137,14 +76,80 @@ interface RouteComparisonProps {
   currentRouteCount?: number;
   currentVehicles?: string[];
   currentDistanceKm?: number | null;
+  apiBaseUrl?: string;
 }
 
-export function RouteComparison({ currentOrders, currentRouteCount, currentVehicles, currentDistanceKm }: RouteComparisonProps) {
+export function RouteComparison({ currentOrders, currentRouteCount, currentVehicles, currentDistanceKm, apiBaseUrl }: RouteComparisonProps) {
   const [result, setResult] = useState<ComparisonResult | null>(null);
+  const [distanceLoading, setDistanceLoading] = useState<"A" | "B" | "both" | null>(null);
   const hasCurrentRoutes = currentOrders && currentOrders.length > 0;
 
   const [fileA, setFileA] = useState<ParsedFile | null>(null);
   const [fileB, setFileB] = useState<ParsedFile | null>(null);
+
+  const baseUrl = apiBaseUrl || import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+
+  // Fetch ORS road distance from backend for a file
+  const fetchDistance = async (file: File): Promise<number | null> => {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const resp = await fetch(`${baseUrl}/api/v1/compare/distance`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return data.total_distance_km ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const processFile = async (
+    file: File,
+    text: string,
+    slot: "A" | "B",
+    otherSlot: ParsedFile | null,
+  ) => {
+    const parsed = parseCSVText(text, file.name);
+    if (!parsed) {
+      toast.error(`Could not parse ${file.name}. Ensure it has a 'Work Order Number' column.`);
+      return;
+    }
+
+    const full: ParsedFile = { ...parsed, distanceLoading: true, rawFile: file };
+
+    if (slot === "A") {
+      setFileA(full);
+      if (otherSlot) setResult(compare(full, otherSlot));
+    } else {
+      setFileB(full);
+      if (otherSlot) setResult(compare(otherSlot, full));
+    }
+
+    // Check if file has Rt + Lat/Lng columns for distance calculation
+    const firstLine = text.trim().split("\n")[0];
+    const headers = firstLine.split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+    const hasRouteData = headers.includes("Rt") && headers.includes("Latitude") && headers.includes("Longitude");
+
+    let distance: number | null = null;
+    if (hasRouteData) {
+      setDistanceLoading(slot);
+      distance = await fetchDistance(file);
+      setDistanceLoading(null);
+    }
+
+    const withDist: ParsedFile = { ...full, totalDistanceKm: distance, distanceLoading: false };
+
+    if (slot === "A") {
+      setFileA(withDist);
+      if (otherSlot) setResult(compare(withDist, otherSlot));
+    } else {
+      setFileB(withDist);
+      if (otherSlot) setResult(compare(otherSlot, withDist));
+    }
+  };
 
   const handleFile = (fileNum: "A" | "B") => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -153,19 +158,8 @@ export function RouteComparison({ currentOrders, currentRouteCount, currentVehic
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
-      const parsed = parseCSV(text, file.name);
-      if (!parsed) {
-        toast.error(`Could not parse ${file.name}. Ensure it has a 'Work Order Number' column.`);
-        return;
-      }
-
-      if (fileNum === "A") {
-        setFileA(parsed);
-        if (fileB) setResult(compare(parsed, fileB));
-      } else {
-        setFileB(parsed);
-        if (fileA) setResult(compare(fileA, parsed));
-      }
+      const other = fileNum === "A" ? fileB : fileA;
+      processFile(file, text, fileNum, other);
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -178,11 +172,6 @@ export function RouteComparison({ currentOrders, currentRouteCount, currentVehic
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
-      const parsed = parseCSV(text, file.name);
-      if (!parsed) {
-        toast.error(`Could not parse ${file.name}. Ensure it has a 'Work Order Number' column.`);
-        return;
-      }
 
       const currentParsed: ParsedFile = {
         fileName: "Current optimization",
@@ -191,11 +180,11 @@ export function RouteComparison({ currentOrders, currentRouteCount, currentVehic
         vehicles: currentVehicles ?? [],
         workOrders: new Set(currentOrders),
         totalDistanceKm: currentDistanceKm ?? null,
+        distanceLoading: false,
       };
 
-      setFileA(parsed);
       setFileB(currentParsed);
-      setResult(compare(parsed, currentParsed));
+      processFile(file, text, "A", currentParsed);
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -291,11 +280,19 @@ export function RouteComparison({ currentOrders, currentRouteCount, currentVehic
                 </tr>
                 <tr>
                   <td className="px-3 py-2 text-gray-700">
-                    Est. Distance
-                    <span className="text-[10px] text-gray-400 ml-1">(km)</span>
+                    Road Distance
+                    <span className="text-[10px] text-gray-400 ml-1">(km, via ORS)</span>
                   </td>
-                  <td className="px-3 py-2 text-right font-medium text-gray-500">{distA != null ? distA : "-"}</td>
-                  <td className="px-3 py-2 text-right font-medium">{distB != null ? distB : "-"}</td>
+                  <td className="px-3 py-2 text-right font-medium text-gray-500">
+                    {distanceLoading === "A" || distanceLoading === "both"
+                      ? <Loader2 className="size-3 animate-spin inline" />
+                      : distA != null ? distA : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right font-medium">
+                    {distanceLoading === "B" || distanceLoading === "both"
+                      ? <Loader2 className="size-3 animate-spin inline" />
+                      : distB != null ? distB : "-"}
+                  </td>
                   <td className="px-3 py-2 text-right">
                     {distDiff != null ? <DiffBadge value={distDiff} suffix=" km" invert /> : <span className="text-gray-300 text-xs">-</span>}
                   </td>
@@ -319,11 +316,14 @@ export function RouteComparison({ currentOrders, currentRouteCount, currentVehic
             </table>
           </div>
 
-          {distA != null && distB != null && (
-            <p className="text-[10px] text-gray-400">
-              Distance estimated via Haversine (1.4x road factor). Current routes use ORS road distance when available.
+          <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5 text-[11px] text-blue-800 space-y-1">
+            <p>
+              <strong>Road Distance</strong> is calculated using ORS Directions (real driving paths
+              on actual roads). For uploaded files, the backend reads the Rt, Seq, Latitude,
+              and Longitude columns to compute depot &rarr; stops &rarr; depot distance per route.
+              Files without these columns show &ldquo;-&rdquo;.
             </p>
-          )}
+          </div>
 
           {(result.addedOrders.length > 0 || result.removedOrders.length > 0) && (
             <div className="grid grid-cols-2 gap-3 text-xs">

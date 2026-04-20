@@ -9,6 +9,49 @@ from app.models.schemas import GroupedStop
 logger = logging.getLogger(__name__)
 
 
+def calculate_route_distance(
+    coords: list[tuple[float, float]],
+) -> Optional[float]:
+    """
+    Calculate the road distance (km) for an ordered list of (lng, lat) coordinates
+    using ORS Directions. No geometry is returned — just the distance.
+
+    Returns distance_km or None on failure.
+    """
+    if len(coords) < 2:
+        return None
+
+    try:
+        client = openrouteservice.Client(
+            key=settings.ORS_API_KEY or None,
+            base_url=settings.ORS_BASE_URL,
+        )
+
+        response = openrouteservice.directions.directions(
+            client,
+            coordinates=coords,
+            profile="driving-hgv",
+            format="geojson",
+            geometry=False,
+            instructions=False,
+            optimize_waypoints=False,
+            validate=False,
+        )
+
+        features = response.get("features", [])
+        if not features:
+            return None
+
+        distance_m = features[0].get("properties", {}).get("summary", {}).get("distance")
+        if distance_m is not None:
+            return round(distance_m / 1000, 1)
+        return None
+
+    except Exception as e:
+        logger.warning("ORS distance calculation failed: %s", e)
+        return None
+
+
 def build_route_geometry(
     route_stops: list[GroupedStop],
 ) -> tuple[Optional[dict], Optional[float]]:
