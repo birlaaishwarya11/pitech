@@ -326,33 +326,28 @@ export function RouteComparison({ currentOrders, currentRouteCount, currentVehic
           )}
 
           {(result.addedOrders.length > 0 || result.removedOrders.length > 0) && (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-gray-500 hover:text-gray-700 font-medium">
-                Show order details
-              </summary>
-              <div className="mt-2 grid grid-cols-2 gap-3">
-                {result.addedOrders.length > 0 && (
-                  <div>
-                    <p className="font-medium text-green-700 mb-1">Added ({result.addedOrders.length})</p>
-                    <div className="max-h-32 overflow-y-auto space-y-0.5">
-                      {result.addedOrders.map((wo) => (
-                        <div key={wo} className="text-green-600">{wo}</div>
-                      ))}
-                    </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              {result.addedOrders.length > 0 && (
+                <div className="rounded-lg bg-green-50 border border-green-200 p-3">
+                  <p className="font-semibold text-green-800 mb-2">Added ({result.addedOrders.length})</p>
+                  <div className="max-h-36 overflow-y-auto space-y-1">
+                    {result.addedOrders.map((wo) => (
+                      <div key={wo} className="text-green-700 font-mono">{wo}</div>
+                    ))}
                   </div>
-                )}
-                {result.removedOrders.length > 0 && (
-                  <div>
-                    <p className="font-medium text-red-700 mb-1">Removed ({result.removedOrders.length})</p>
-                    <div className="max-h-32 overflow-y-auto space-y-0.5">
-                      {result.removedOrders.map((wo) => (
-                        <div key={wo} className="text-red-600">{wo}</div>
-                      ))}
-                    </div>
+                </div>
+              )}
+              {result.removedOrders.length > 0 && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+                  <p className="font-semibold text-red-800 mb-2">Removed ({result.removedOrders.length})</p>
+                  <div className="max-h-36 overflow-y-auto space-y-1">
+                    {result.removedOrders.map((wo) => (
+                      <div key={wo} className="text-red-700 font-mono">{wo}</div>
+                    ))}
                   </div>
-                )}
-              </div>
-            </details>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
