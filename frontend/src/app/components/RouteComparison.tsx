@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
+import { X } from "lucide-react";
 
 interface ParsedFile {
   fileName: string;
@@ -235,63 +236,98 @@ export function RouteComparison({ currentOrders, currentRouteCount, currentVehic
 
       {result && (
         <div className="border-t border-gray-100 pt-3 space-y-3">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500 mb-1">Orders</p>
-              <p className="text-lg font-semibold">{result.fileA.totalOrders} → {result.fileB.totalOrders}</p>
-              <DiffBadge value={result.fileB.totalOrders - result.fileA.totalOrders} />
+          {/* Header with file names and close button */}
+          <div className="flex items-start justify-between">
+            <div className="text-xs space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-gray-400" />
+                <span className="text-gray-500">Old:</span>
+                <span className="font-medium text-gray-700 truncate max-w-[200px]">{result.fileA.fileName}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
+                <span className="text-gray-500">New:</span>
+                <span className="font-medium text-gray-700 truncate max-w-[200px]">{result.fileB.fileName}</span>
+              </div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500 mb-1">Routes</p>
-              <p className="text-lg font-semibold">{result.fileA.routes} → {result.fileB.routes}</p>
-              <DiffBadge value={result.fileB.routes - result.fileA.routes} invert />
-            </div>
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500 mb-1">Vehicles</p>
-              <p className="text-lg font-semibold">{result.fileA.vehicles.length} → {result.fileB.vehicles.length}</p>
-              <DiffBadge value={result.fileB.vehicles.length - result.fileA.vehicles.length} invert />
-            </div>
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500 mb-1">Est. Distance</p>
-              {distA != null && distB != null ? (
-                <>
-                  <p className="text-lg font-semibold">{distA} → {distB} km</p>
-                  <DiffBadge value={distDiff!} suffix=" km" invert />
-                </>
-              ) : distA != null ? (
-                <p className="text-sm font-medium">{distA} km <span className="text-gray-400">→ ?</span></p>
-              ) : distB != null ? (
-                <p className="text-sm font-medium"><span className="text-gray-400">? →</span> {distB} km</p>
-              ) : (
-                <p className="text-sm text-gray-400">No coordinates</p>
-              )}
-            </div>
+            <button
+              onClick={() => { setResult(null); setFileA(null); setFileB(null); }}
+              className="p-1 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+              title="Close comparison"
+            >
+              <X className="size-4" />
+            </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 text-sm">
-            <div className="text-center">
-              <span className="text-gray-500">Common orders:</span>{" "}
-              <span className="font-medium">{result.commonOrders}</span>
-            </div>
-            <div className="text-center">
-              <span className="text-green-600">+ Added:</span>{" "}
-              <span className="font-medium">{result.addedOrders.length}</span>
-            </div>
-            <div className="text-center">
-              <span className="text-red-600">- Removed:</span>{" "}
-              <span className="font-medium">{result.removedOrders.length}</span>
-            </div>
+          {/* Comparison table */}
+          <div className="overflow-hidden rounded-lg border border-gray-200">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Metric</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-400">Old</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-blue-500">New</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Change</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                <tr>
+                  <td className="px-3 py-2 text-gray-700">Orders</td>
+                  <td className="px-3 py-2 text-right font-medium text-gray-500">{result.fileA.totalOrders}</td>
+                  <td className="px-3 py-2 text-right font-medium">{result.fileB.totalOrders}</td>
+                  <td className="px-3 py-2 text-right"><DiffBadge value={result.fileB.totalOrders - result.fileA.totalOrders} /></td>
+                </tr>
+                <tr>
+                  <td className="px-3 py-2 text-gray-700">Routes</td>
+                  <td className="px-3 py-2 text-right font-medium text-gray-500">{result.fileA.routes}</td>
+                  <td className="px-3 py-2 text-right font-medium">{result.fileB.routes}</td>
+                  <td className="px-3 py-2 text-right"><DiffBadge value={result.fileB.routes - result.fileA.routes} invert /></td>
+                </tr>
+                <tr>
+                  <td className="px-3 py-2 text-gray-700">Vehicles</td>
+                  <td className="px-3 py-2 text-right font-medium text-gray-500">{result.fileA.vehicles.length}</td>
+                  <td className="px-3 py-2 text-right font-medium">{result.fileB.vehicles.length}</td>
+                  <td className="px-3 py-2 text-right"><DiffBadge value={result.fileB.vehicles.length - result.fileA.vehicles.length} invert /></td>
+                </tr>
+                <tr>
+                  <td className="px-3 py-2 text-gray-700">
+                    Est. Distance
+                    <span className="text-[10px] text-gray-400 ml-1">(km)</span>
+                  </td>
+                  <td className="px-3 py-2 text-right font-medium text-gray-500">{distA != null ? distA : "-"}</td>
+                  <td className="px-3 py-2 text-right font-medium">{distB != null ? distB : "-"}</td>
+                  <td className="px-3 py-2 text-right">
+                    {distDiff != null ? <DiffBadge value={distDiff} suffix=" km" invert /> : <span className="text-gray-300 text-xs">-</span>}
+                  </td>
+                </tr>
+                <tr className="bg-gray-50">
+                  <td className="px-3 py-2 text-gray-700">Common orders</td>
+                  <td colSpan={2} className="px-3 py-2 text-center font-medium">{result.commonOrders}</td>
+                  <td className="px-3 py-2" />
+                </tr>
+                <tr className="bg-gray-50">
+                  <td className="px-3 py-2 text-gray-700">Added</td>
+                  <td colSpan={2} className="px-3 py-2 text-center font-medium text-green-600">+{result.addedOrders.length}</td>
+                  <td className="px-3 py-2" />
+                </tr>
+                <tr className="bg-gray-50">
+                  <td className="px-3 py-2 text-gray-700">Removed</td>
+                  <td colSpan={2} className="px-3 py-2 text-center font-medium text-red-600">-{result.removedOrders.length}</td>
+                  <td className="px-3 py-2" />
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           {distA != null && distB != null && (
-            <p className="text-xs text-gray-400 text-center">
-              Distance is estimated using Haversine with 1.4x road factor. Current routes use ORS road distance when available.
+            <p className="text-[10px] text-gray-400">
+              Distance estimated via Haversine (1.4x road factor). Current routes use ORS road distance when available.
             </p>
           )}
 
           {(result.addedOrders.length > 0 || result.removedOrders.length > 0) && (
             <details className="text-xs">
-              <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
+              <summary className="cursor-pointer text-gray-500 hover:text-gray-700 font-medium">
                 Show order details
               </summary>
               <div className="mt-2 grid grid-cols-2 gap-3">
@@ -318,13 +354,6 @@ export function RouteComparison({ currentOrders, currentRouteCount, currentVehic
               </div>
             </details>
           )}
-
-          <button
-            onClick={() => { setResult(null); setFileA(null); setFileB(null); }}
-            className="text-xs text-gray-400 hover:text-gray-600"
-          >
-            Clear comparison
-          </button>
         </div>
       )}
     </div>
