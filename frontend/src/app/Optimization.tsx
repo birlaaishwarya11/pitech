@@ -67,18 +67,28 @@ interface OptimizationResponse {
 type ApiStatus = "checking" | "connected" | "error";
 
 export default function Optimization() {
-  const [ordersCount, setOrdersCount] = useState(0);
-  const [totalPallets, setTotalPallets] = useState(0);
+  // Restore session state on mount
+  const loadSession = <T,>(key: string, fallback: T): T => {
+    try {
+      const raw = sessionStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const [ordersCount, setOrdersCount] = useState(() => loadSession("pi_ordersCount", 0));
+  const [totalPallets, setTotalPallets] = useState(() => loadSession("pi_totalPallets", 0));
 
   const [ordersFile, setOrdersFile] = useState<File | null>(null);
   const [assetsFile, setAssetsFile] = useState<File | null>(null);
   const [specialInstructionsText, setSpecialInstructionsText] = useState("");
   const [optimizationResult, setOptimizationResult] =
-    useState<OptimizationResponse | null>(null);
+    useState<OptimizationResponse | null>(() => loadSession("pi_result", null));
 
   // Manual route editing state
-  const [removedStops, setRemovedStops] = useState<OptimizationStopResult[]>([]);
-  const [modifiedRoutes, setModifiedRoutes] = useState<OptimizationRouteResult[]>([]);
+  const [removedStops, setRemovedStops] = useState<OptimizationStopResult[]>(() => loadSession("pi_removedStops", []));
+  const [modifiedRoutes, setModifiedRoutes] = useState<OptimizationRouteResult[]>(() => loadSession("pi_modifiedRoutes", []));
   const [activeTab, setActiveTab] = useState("map");
   const [routesToShow, setRoutesToShow] = useState<number[]>([]);
 
@@ -91,6 +101,27 @@ export default function Optimization() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Persist optimization state to sessionStorage so it survives page refresh
+  useEffect(() => {
+    if (optimizationResult) {
+      sessionStorage.setItem("pi_result", JSON.stringify(optimizationResult));
+      sessionStorage.setItem("pi_ordersCount", JSON.stringify(ordersCount));
+      sessionStorage.setItem("pi_totalPallets", JSON.stringify(totalPallets));
+    } else {
+      sessionStorage.removeItem("pi_result");
+      sessionStorage.removeItem("pi_ordersCount");
+      sessionStorage.removeItem("pi_totalPallets");
+    }
+  }, [optimizationResult, ordersCount, totalPallets]);
+
+  useEffect(() => {
+    sessionStorage.setItem("pi_modifiedRoutes", JSON.stringify(modifiedRoutes));
+  }, [modifiedRoutes]);
+
+  useEffect(() => {
+    sessionStorage.setItem("pi_removedStops", JSON.stringify(removedStops));
+  }, [removedStops]);
 
   const today = new Date().toISOString().split("T")[0];
   const hasRequiredFiles = ordersFile !== null && assetsFile !== null;
@@ -213,6 +244,11 @@ export default function Optimization() {
     setOptimizationResult(null);
     setRemovedStops([]);
     setModifiedRoutes([]);
+    sessionStorage.removeItem("pi_result");
+    sessionStorage.removeItem("pi_ordersCount");
+    sessionStorage.removeItem("pi_totalPallets");
+    sessionStorage.removeItem("pi_modifiedRoutes");
+    sessionStorage.removeItem("pi_removedStops");
   };
 
   const handleRemoveStop = (routeNumber: number, stopSeq: number) => {
