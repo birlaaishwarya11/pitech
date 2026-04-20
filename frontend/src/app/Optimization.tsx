@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Toaster } from "./components/ui/sonner";
 import { RouteMap } from "./components/RouteMap";
 import { RemovedStopsPanel } from "./components/RemovedStopsPanel";
+import { RouteComparison } from "./components/RouteComparison";
 import { EditableRouteList } from "./components/EditableRouteList";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { Button } from "./components/ui/button";
@@ -89,6 +90,7 @@ export default function Optimization() {
   // Manual route editing state
   const [removedStops, setRemovedStops] = useState<OptimizationStopResult[]>(() => loadSession("pi_removedStops", []));
   const [modifiedRoutes, setModifiedRoutes] = useState<OptimizationRouteResult[]>(() => loadSession("pi_modifiedRoutes", []));
+
   const [activeTab, setActiveTab] = useState("map");
   const [routesToShow, setRoutesToShow] = useState<number[]>([]);
 
@@ -461,6 +463,8 @@ export default function Optimization() {
             onWave2CutoffChange={setWave2Cutoff}
           />
 
+          {!optimizationResult && <RouteComparison />}
+
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">
               Fleet display
@@ -758,6 +762,20 @@ export default function Optimization() {
                   </div>
                 </div>
               </div>
+
+              <RouteComparison
+                currentOrders={
+                  (modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes)
+                    .flatMap((r) => r.stops.flatMap((s) => s.work_order_numbers))
+                }
+                currentRouteCount={
+                  (modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes).length
+                }
+                currentVehicles={
+                  (modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes)
+                    .map((r) => r.vehicle)
+                }
+              />
             </div>
           )}
         </div>
