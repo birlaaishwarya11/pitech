@@ -1,8 +1,14 @@
-from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Query
+from fastapi import APIRouter, File, Form, Request, UploadFile, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from typing import Optional
 import io
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+
+from app.config import settings
 from app.models.schemas import OptimizationResponse
 from app.services.csv_parser import parse_orders_csv, parse_assets_csv
 from app.services.grouper import group_orders_into_stops
@@ -50,11 +56,16 @@ async def _run_optimization(
         unique_locations, use_ors=use_ors,
     )
 
+    # Scale solver time with problem size — small sets don't need 180s
+    num_stops = len(stops)
+    solver_time = min(30 + num_stops, settings.SOLVER_TIME_LIMIT_SECONDS)
+
     solver_result = solve_vrp(
         stops=stops,
         vehicles=vehicles,
         duration_matrix=duration_matrix,
         stop_to_location=stop_to_location,
+        time_limit_seconds=solver_time,
         depot_open_minutes=depot_open,
         depot_close_minutes=depot_close,
     )
@@ -76,7 +87,9 @@ async def _run_optimization(
 
 
 @router.post("/optimize", response_model=OptimizationResponse)
+@limiter.limit("10/minute")
 async def optimize_routes(
+    request: Request,
     orders_file: UploadFile = File(..., description="Orders CSV or XLS file"),
     assets_file: UploadFile = File(..., description="Asset/vehicle CSV file"),
     use_ors: bool = Query(True, description="Use OpenRouteService (True) or Haversine fallback (False)"),
@@ -135,7 +148,9 @@ async def optimize_routes(
 
 
 @router.post("/optimize/csv")
+@limiter.limit("10/minute")
 async def optimize_routes_csv(
+    request: Request,
     orders_file: UploadFile = File(..., description="Orders CSV or XLS file"),
     assets_file: UploadFile = File(..., description="Asset/vehicle CSV file"),
     use_ors: bool = Query(True, description="Use OpenRouteService (True) or Haversine fallback (False)"),
@@ -177,7 +192,9 @@ async def optimize_routes_csv(
 
 
 @router.post("/optimize/xlsx")
+@limiter.limit("10/minute")
 async def optimize_routes_xlsx(
+    request: Request,
     orders_file: UploadFile = File(..., description="Orders CSV or XLS file"),
     assets_file: UploadFile = File(..., description="Asset/vehicle CSV file"),
     use_ors: bool = Query(True, description="Use OpenRouteService (True) or Haversine fallback (False)"),
