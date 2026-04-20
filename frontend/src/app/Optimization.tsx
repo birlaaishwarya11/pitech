@@ -47,6 +47,7 @@ interface OptimizationRouteResult {
   vehicle_capacity_pallets: number;
   total_pallets: number;
   num_stops: number;
+  total_distance_km?: number | null;
   stops: OptimizationStopResult[];
   geometry?: RouteGeometry | null;
 }
@@ -84,6 +85,8 @@ export default function Optimization() {
   const [ordersFile, setOrdersFile] = useState<File | null>(null);
   const [assetsFile, setAssetsFile] = useState<File | null>(null);
   const [specialInstructionsText, setSpecialInstructionsText] = useState("");
+  const [vehicleNames, setVehicleNames] = useState<string[]>([]);
+  const [avoidedVehicles, setAvoidedVehicles] = useState<string[]>([]);
   const [optimizationResult, setOptimizationResult] =
     useState<OptimizationResponse | null>(() => loadSession("pi_result", null));
 
@@ -342,7 +345,30 @@ export default function Optimization() {
 
   const handleAssetsFileChange = (file: File | null) => {
     setAssetsFile(file);
+    setAvoidedVehicles([]);
     resetOptimizationView();
+
+    if (!file) {
+      setVehicleNames([]);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+        const names = rows
+          .map((r) => String(r["Name"] || "").trim())
+          .filter(Boolean);
+        setVehicleNames(names);
+      } catch {
+        setVehicleNames([]);
+      }
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   const handleGenerateRoutes = async () => {
@@ -368,6 +394,10 @@ export default function Optimization() {
         );
       }
 
+      if (avoidedVehicles.length > 0) {
+        formData.append("avoid_vehicles", avoidedVehicles.join(","));
+      }
+
       // Load settings from localStorage
       const savedSettings = localStorage.getItem("backendSettings");
       if (savedSettings) {
@@ -381,7 +411,14 @@ export default function Optimization() {
 
       if (!res.ok) {
         const errorText = await res.text();
-        throw new Error(errorText || `HTTP ${res.status}`);
+        let errorMessage = `HTTP ${res.status}`;
+        try {
+          const parsed = JSON.parse(errorText);
+          errorMessage = parsed.detail || parsed.message || parsed.error || errorMessage;
+        } catch {
+          if (errorText) errorMessage = errorText;
+        }
+        throw new Error(errorMessage);
       }
 
       const data: OptimizationResponse = await res.json();
@@ -461,6 +498,9 @@ export default function Optimization() {
             onDepotCloseChange={setDepotClose}
             onNumWavesChange={setNumWaves}
             onWave2CutoffChange={setWave2Cutoff}
+            vehicleNames={vehicleNames}
+            avoidedVehicles={avoidedVehicles}
+            onAvoidedVehiclesChange={setAvoidedVehicles}
           />
 
           {!optimizationResult && <RouteComparison />}
@@ -469,14 +509,73 @@ export default function Optimization() {
             <h3 className="text-sm font-semibold text-gray-900 mb-3">
               Fleet display
             </h3>
-            <p className="text-sm text-gray-600">
-              Detailed vehicle cards are not connected to backend route data
-              yet.
-            </p>
-            <p className="text-xs text-gray-500 mt-2">
-              This run uses backend-generated vehicle assignments in the
-              downloadable route plan.
-            </p>
+            {(() => {
+              const routes = modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult?.routes;
+              if (!routes || routes.length === 0) {
+                return (
+                  <p className="text-sm text-gray-500">
+                    No vehicle data yet. Run an optimization to see fleet assignments.
+                  </p>
+                );
+              }
+              return (
+                <div className="space-y-3 max-h-72 overflow-y-auto">
+                  {routes.map((route) => {
+                    const utilization = Math.round(
+                      (route.total_pallets / route.vehicle_capacity_pallets) * 100
+                    );
+                    const isOver = route.total_pallets > route.vehicle_capacity_pallets;
+                    const isNear = utilization >= 85 && !isOver;
+                    return (
+                      <div
+                        key={route.route_number}
+                        className="rounded-lg border border-gray-100 bg-gray-50 p-3 space-y-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-900">
+                            {route.vehicle}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            Rt {route.route_number}
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className={`h-2 rounded-full ${
+                              isOver
+                                ? "bg-red-500"
+                                : isNear
+                                  ? "bg-amber-500"
+                                  : "bg-green-500"
+                            }`}
+                            style={{ width: `${Math.min(utilization, 100)}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-gray-600">
+                          <span>
+                            {route.total_pallets} / {route.vehicle_capacity_pallets} pallets
+                          </span>
+                          <span
+                            className={`font-medium ${
+                              isOver
+                                ? "text-red-700"
+                                : isNear
+                                  ? "text-amber-700"
+                                  : "text-green-700"
+                            }`}
+                          >
+                            {utilization}%
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          {route.num_stops} stop{route.num_stops !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="bg-white rounded-lg border border-gray-200 p-5">
@@ -774,6 +873,10 @@ export default function Optimization() {
                 currentVehicles={
                   (modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes)
                     .map((r) => r.vehicle)
+                }
+                currentDistanceKm={
+                  (modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes)
+                    .reduce((sum, r) => sum + (r.total_distance_km ?? 0), 0) || null
                 }
               />
             </div>
