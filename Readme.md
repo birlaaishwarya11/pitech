@@ -38,7 +38,8 @@ ORS provides real road-distance and travel-time matrices used by the solver. It 
 ### Start ORS
 
 ```bash
-docker compose up -d ors
+./scripts/setup-ors.sh
+# docker compose up -d ors
 ```
 
 On the first launch ORS will download the OpenStreetMap graph and build it. This can take **several minutes** (watch logs with `docker compose logs -f ors`). The service is ready when the health check passes:
