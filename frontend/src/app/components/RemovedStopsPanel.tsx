@@ -17,6 +17,7 @@ interface Stop {
   order_types: string[];
   latitude: number;
   longitude: number;
+  sourceRouteNumber: number;
 }
 
 interface RemovedStopsPanelProps {
@@ -70,6 +71,9 @@ export function RemovedStopsPanel({
                   {stop.address}, {stop.city}, {stop.state}
                 </p>
                 <div className="flex gap-2 mt-1">
+                  <span className="inline-block bg-gray-100 text-gray-800 px-2 py-0.5 rounded text-xs">
+                    Route {stop.sourceRouteNumber}
+                  </span>
                   <span className="inline-block bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-xs">
                     {stop.pallets} pallets
                   </span>

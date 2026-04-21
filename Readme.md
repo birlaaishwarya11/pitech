@@ -271,6 +271,10 @@ Then open http://localhost:5173
 
 **Data flow:** CSV upload → parse & validate → group orders into stops → build distance/duration matrix via ORS → solve CVRPTW with OR-Tools → build road geometry per route → return JSON to frontend → render on Leaflet map
 
+### Business Rules
+
+- **Whole pallets only:** Fractional pallet values in the orders CSV (e.g. 2.3 Food Pallets) are rounded **up** to the next whole number per category (Food, Pet Food, Chemical) before summing. Pallets cannot be mixed, so partial pallets always count as a full pallet.
+
 ---
 
 ## Backend API

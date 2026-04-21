@@ -41,6 +41,10 @@ interface OptimizationStopResult {
   longitude: number;
 }
 
+interface RemovedStop extends OptimizationStopResult {
+  sourceRouteNumber: number;
+}
+
 interface OptimizationRouteResult {
   route_number: number;
   vehicle: string;
@@ -91,7 +95,7 @@ export default function Optimization() {
     useState<OptimizationResponse | null>(() => loadSession("pi_result", null));
 
   // Manual route editing state
-  const [removedStops, setRemovedStops] = useState<OptimizationStopResult[]>(() => loadSession("pi_removedStops", []));
+  const [removedStops, setRemovedStops] = useState<RemovedStop[]>(() => loadSession("pi_removedStops", []));
   const [modifiedRoutes, setModifiedRoutes] = useState<OptimizationRouteResult[]>(() => loadSession("pi_modifiedRoutes", []));
 
   const [activeTab, setActiveTab] = useState("map");
@@ -266,7 +270,7 @@ export default function Optimization() {
     const stopToRemove = route.stops.find((s) => s.seq === stopSeq);
     if (!stopToRemove) return;
 
-    setRemovedStops([...removedStops, stopToRemove]);
+    setRemovedStops([...removedStops, { ...stopToRemove, sourceRouteNumber: routeNumber }]);
 
     const newRoutes = updatedRoutes.map((r) => {
       if (r.route_number === routeNumber) {
@@ -286,10 +290,30 @@ export default function Optimization() {
     });
   };
 
-  const handleRestoreStop = (stop: OptimizationStopResult) => {
+  const handleRestoreStop = (stop: RemovedStop) => {
+    if (!optimizationResult) return;
+
+    const updatedRoutes = modifiedRoutes.length > 0 ? modifiedRoutes : optimizationResult.routes;
+
+    // Add the stop back to its original route
+    const { sourceRouteNumber, ...stopData } = stop;
+    const newRoutes = updatedRoutes.map((r) => {
+      if (r.route_number === sourceRouteNumber) {
+        const restoredStops = [...r.stops, stopData].sort((a, b) => a.seq - b.seq);
+        return {
+          ...r,
+          stops: restoredStops,
+          num_stops: r.num_stops + 1,
+          total_pallets: r.total_pallets + stop.pallets,
+        };
+      }
+      return r;
+    });
+
+    setModifiedRoutes(newRoutes);
     setRemovedStops(removedStops.filter((s) => s.seq !== stop.seq));
     toast.success("Stop restored", {
-      description: `${stop.name} moved back to unassigned`,
+      description: `${stop.name} added back to route ${sourceRouteNumber}`,
     });
   };
 
