@@ -1,4 +1,5 @@
 import logging
+import math
 import pandas as pd
 from io import BytesIO
 from lxml import etree
@@ -152,11 +153,11 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
             else settings.DEFAULT_SERVICE_TIME
         )
 
-        # Pallets (fractional → scaled integer)
-        food = float(row["Food Pallets"]) if pd.notna(row["Food Pallets"]) else 0.0
-        pet  = float(row[" Pet Food Pallets"]) if pd.notna(row[" Pet Food Pallets"]) else 0.0
-        chem = float(row["Chemical Pallets"]) if pd.notna(row["Chemical Pallets"]) else 0.0
-        total_pallets_scaled = int(round((food + pet + chem) * settings.PALLET_SCALE))
+        # Pallets – round each category up to whole pallets (no fractional pallets)
+        food = math.ceil(float(row["Food Pallets"])) if pd.notna(row["Food Pallets"]) else 0
+        pet  = math.ceil(float(row[" Pet Food Pallets"])) if pd.notna(row[" Pet Food Pallets"]) else 0
+        chem = math.ceil(float(row["Chemical Pallets"])) if pd.notna(row["Chemical Pallets"]) else 0
+        total_pallets_scaled = (food + pet + chem) * settings.PALLET_SCALE
 
         weight = float(row["Weight"]) if pd.notna(row.get("Weight")) else 0.0
 
