@@ -51,7 +51,7 @@ export function RemovedStopsPanel({
       <CardContent className="space-y-2 max-h-96 overflow-y-auto">
         {removedStops.map((stop) => (
           <div
-            key={`${stop.customer_number}-${stop.seq}`}
+            key={`${stop.sourceRouteNumber}-${stop.seq}`}
             className="bg-white rounded border border-amber-200 p-3 text-sm"
             draggable
             onDragStart={(e) => {

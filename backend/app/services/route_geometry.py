@@ -32,19 +32,25 @@ def calculate_route_distance(
             coordinates=coords,
             profile="driving-hgv",
             format="geojson",
-            geometry=False,
             instructions=False,
             optimize_waypoints=False,
             validate=False,
         )
 
+        # GeoJSON format: distance in features[0].properties.summary.distance
         features = response.get("features", [])
-        if not features:
-            return None
+        if features:
+            distance_m = features[0].get("properties", {}).get("summary", {}).get("distance")
+            if distance_m is not None:
+                return round(distance_m / 1000, 1)
 
-        distance_m = features[0].get("properties", {}).get("summary", {}).get("distance")
-        if distance_m is not None:
-            return round(distance_m / 1000, 1)
+        # Fallback: plain JSON format has routes[0].summary.distance
+        routes = response.get("routes", [])
+        if routes:
+            distance_m = routes[0].get("summary", {}).get("distance")
+            if distance_m is not None:
+                return round(distance_m / 1000, 1)
+
         return None
 
     except Exception as e:

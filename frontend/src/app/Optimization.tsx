@@ -311,7 +311,10 @@ export default function Optimization() {
     });
 
     setModifiedRoutes(newRoutes);
-    setRemovedStops(removedStops.filter((s) => s.seq !== stop.seq));
+    // Use seq + sourceRouteNumber to uniquely identify the stop
+    setRemovedStops(removedStops.filter(
+      (s) => !(s.seq === stop.seq && s.sourceRouteNumber === stop.sourceRouteNumber)
+    ));
     toast.success("Stop restored", {
       description: `${stop.name} added back to route ${sourceRouteNumber}`,
     });

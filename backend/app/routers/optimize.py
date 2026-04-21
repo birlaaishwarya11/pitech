@@ -341,7 +341,7 @@ async def compare_file_distance(
             "file_name": file.filename,
             "total_routes": len(route_distances),
             "routes_measured": routes_measured,
-            "total_distance_km": round(total_km, 1),
+            "total_distance_km": round(total_km, 1) if routes_measured > 0 else None,
             "route_distances_km": route_distances,
         }
 
