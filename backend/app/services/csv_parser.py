@@ -37,8 +37,37 @@ def _load_orders_dataframe(file_bytes: bytes) -> pd.DataFrame:
         raise ValueError("Uploaded file is empty. Please select a valid CSV or XLS file.")
     sniff = file_bytes[:200].lstrip()
     if sniff.startswith(b'<?xml') or sniff.startswith(b'<Workbook'):
-        return _read_spreadsheetml(file_bytes)
-    return pd.read_csv(BytesIO(file_bytes), encoding="utf-8-sig")
+        df = _read_spreadsheetml(file_bytes)
+    else:
+        df = pd.read_csv(BytesIO(file_bytes), encoding="utf-8-sig")
+    return _normalize_headers(df)
+
+
+# Known header variants exported by upstream systems that we accept as
+# equivalent to our canonical column names.
+_HEADER_ALIASES = {
+    "work order numbers": "Work Order Number",
+    "work order #": "Work Order Number",
+    "wo number": "Work Order Number",
+    "wo#": "Work Order Number",
+}
+
+
+def _normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize column headers so downstream code can rely on canonical names:
+    strip surrounding whitespace, and map known variants (e.g. the plural
+    'Work Order Numbers') onto the canonical header.
+    """
+    rename = {}
+    for col in df.columns:
+        stripped = col.strip()
+        canonical = _HEADER_ALIASES.get(stripped.lower(), stripped)
+        if canonical != col:
+            rename[col] = canonical
+    if rename:
+        df = df.rename(columns=rename)
+    return df
 
 
 def extract_inline_instructions(df: pd.DataFrame) -> str:
@@ -92,7 +121,7 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
         "Work Order Number", "Customer Number", "Name", "Address",
         "City", "State", "Zip", "Latitude", "Longitude",
         "Open1", "Close1", "FixedTime", "Food Pallets",
-        " Pet Food Pallets", "Chemical Pallets",
+        "Pet Food Pallets", "Chemical Pallets",
     ]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
@@ -156,7 +185,7 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
 
         # Pallets – round each category up to whole pallets (no fractional pallets)
         food = math.ceil(float(row["Food Pallets"])) if pd.notna(row["Food Pallets"]) else 0
-        pet  = math.ceil(float(row[" Pet Food Pallets"])) if pd.notna(row[" Pet Food Pallets"]) else 0
+        pet  = math.ceil(float(row["Pet Food Pallets"])) if pd.notna(row["Pet Food Pallets"]) else 0
         chem = math.ceil(float(row["Chemical Pallets"])) if pd.notna(row["Chemical Pallets"]) else 0
         total_pallets_scaled = (food + pet + chem) * settings.PALLET_SCALE
 
