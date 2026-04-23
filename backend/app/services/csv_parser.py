@@ -104,19 +104,20 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
     orders = []
     skipped_rows = []
     for idx, row in df.iterrows():
-        # NOTE: The original CSV has swapped column names —
-        # "Longitude" contains lat values, "Latitude" contains lng values.
-        # XLS exports may have these columns empty.
-        raw_lat = row.get("Longitude")
-        raw_lng = row.get("Latitude")
+        # Some exports swap the "Latitude"/"Longitude" column headers, so we
+        # identify the two values by sign rather than by header: NYC latitudes
+        # are positive (~40) and longitudes are negative (~-74).
+        v_lon_col = row.get("Longitude")
+        v_lat_col = row.get("Latitude")
 
         wo = str(row.get("Work Order Number", f"row {idx}"))
         name = str(row.get("Name", "unknown"))
 
         lat, lng = None, None
         try:
-            lat = float(raw_lat)
-            lng = float(raw_lng)
+            a = float(v_lon_col)
+            b = float(v_lat_col)
+            lat, lng = (a, b) if a > 0 else (b, a)
             if not (40.4 <= lat <= 41.0 and -74.3 <= lng <= -73.5):
                 logger.warning(
                     "Row %s (WO %s, %s): coordinates out of bounds "
@@ -129,7 +130,7 @@ def parse_orders_csv(file_bytes: bytes) -> tuple[list[OrderRecord], str]:
             logger.warning(
                 "Row %s (WO %s, %s): missing or non-numeric Latitude/Longitude "
                 "(raw_lat=%r, raw_lng=%r) — skipping",
-                idx, wo, name, raw_lat, raw_lng,
+                idx, wo, name, v_lat_col, v_lon_col,
             )
             skipped_rows.append(f"WO {wo} ({name}): missing or invalid coordinates")
 
