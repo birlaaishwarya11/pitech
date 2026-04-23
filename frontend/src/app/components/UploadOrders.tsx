@@ -263,6 +263,9 @@ export function UploadOrders({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 font-mono placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         )}
+        <p className="mt-2 text-[11px] leading-snug text-gray-500">
+          Note: conflicting instructions (e.g. time windows that can't be satisfied, or a stop locked to a truck without enough capacity) may prevent the solver from finding a solution and produce an error.
+        </p>
       </div>
 
       {/* Result Stats */}
