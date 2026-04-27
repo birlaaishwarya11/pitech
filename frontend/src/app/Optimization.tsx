@@ -224,7 +224,7 @@ export default function Optimization() {
         "Rt": "REMOVED",
         "Seq": 0,
         "Assigned Vehicle": "",
-        "Work Order Numbers": stop.work_order_numbers.join(", "),
+        "Work Order Number": stop.work_order_numbers.join(", "),
         "Customer Number": stop.customer_number,
         "Name": stop.name,
         "Address": stop.address,
